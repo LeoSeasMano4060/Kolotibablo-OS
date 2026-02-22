@@ -9,7 +9,7 @@ LD             = ld
 GRUB_MKRESCUE  = grub-mkrescue
 QEMU           = qemu-system-i386
 
-CFLAGS  = -m32 -ffreestanding -fno-stack-protector -fno-builtin -nostdlib -nostdinc -Wall -Wextra -O2
+CFLAGS  = -m32 -ffreestanding -fno-stack-protector -fno-builtin -nostdlib -Wall -Wextra -O2
 ASFLAGS = -f elf32
 LDFLAGS = -T linker.ld -m elf_i386 -nostdlib
 
@@ -45,3 +45,4 @@ run: $(ISO)
 clean:
 	rm -f *.o $(KERNEL) $(ISO)
 	rm -rf $(ISODIR)
+
