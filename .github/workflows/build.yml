@@ -1,0 +1,39 @@
+name: Build Kolotibablo OS
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:   # permite ejecutar manualmente desde la web
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout código fuente
+        uses: actions/checkout@v4
+
+      - name: Instalar herramientas de compilación
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y build-essential nasm grub-pc-bin xorriso mtools
+
+      - name: Compilar kernel ELF
+        run: make
+
+      - name: Generar imagen ISO
+        run: make iso
+
+      - name: Verificar resultado
+        run: |
+          echo "=== Archivos generados ==="
+          ls -lh kolotibablo.elf kolotibablo.iso
+          echo "=== Info del ELF ==="
+          file kolotibablo.elf
+
+      - name: Subir ISO como artefacto descargable
+        uses: actions/upload-artifact@v4
+        with:
+          name: kolotibablo-iso
+          path: kolotibablo.iso
+          retention-days: 30
