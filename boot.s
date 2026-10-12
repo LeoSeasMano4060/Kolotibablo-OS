@@ -13,11 +13,11 @@ align 4
     dd MB_CHECKSUM
 
     ; Campos para la solicitud de modo gráfico VBE en Multiboot v1
-    dd 0, 0, 0, 0, 0        ; aout kludge (no usado en ELF)
-    dd 0                    ; 0 = linear graphics mode
-    dd 1024                 ; Ancho: 1024
-    dd 768                  ; Alto: 768
-    dd 32                   ; BPP: 32 (ARGB)
+    dd 0, 0, 0, 0, 0
+    dd 0
+    dd 1024
+    dd 768
+    dd 32
 
 section .bss
 align 16
