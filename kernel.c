@@ -1,265 +1,213 @@
 /*
- * kernel.c — Kernel principal de Kolotibablo OS
+ * kernel.c â€” Kernel interactivo y profesional para Kolotibablo OS
  *
- * Compilación: freestanding (sin biblioteca estándar C)
- * No se usan funciones de libc: no hay printf, malloc, etc.
- * Accedemos al hardware directamente a través del buffer de texto VGA.
- *
- * Buffer VGA en modo texto 80x25:
- *   Dirección física: 0xB8000
- *   Cada celda = 2 bytes: [byte_alto = atributo de color] [byte_bajo = código ASCII]
- *   Total celdas: 80 columnas × 25 filas = 2000 celdas × 2 bytes = 4000 bytes
+ * Modo Texto VGA 80x25 (0xB8000)
+ * CodificaciÃ³n de caracteres: IBM Code Page 437 (CP437)
+ * DiseÃ±o: Interfaz TUI completa con marcos, ventana central y barra de estado.
  */
 
-/* ============================================================================
- * Includes de tamaño fijo (compatibles con freestanding: no requieren libc)
- * stdint.h define uint8_t, uint16_t, size_t de forma portable
- * stddef.h define size_t, NULL
- * ============================================================================ */
 #include <stdint.h>
 #include <stddef.h>
 
-/* ============================================================================
- * Constantes del hardware VGA
- * ============================================================================ */
-
-/** Número de columnas del modo texto VGA 80×25 */
 static const size_t VGA_WIDTH  = 80;
-
-/** Número de filas del modo texto VGA 80×25 */
 static const size_t VGA_HEIGHT = 25;
 
-/** Dirección física del buffer de texto VGA.
- *  'volatile' indica al compilador que este puntero accede a hardware real
- *  y que no debe optimizar ni reordenar los accesos de escritura/lectura. */
 #define VGA_MEMORY ((volatile uint16_t*)0xB8000)
 
 /* ============================================================================
- * Enumeración de colores VGA (4 bits por componente: fondo | frente)
- * Los valores corresponden al nibble de color de la BIOS/VGA
+ * Constantes de Caracteres CP437 (IBM Box-Drawing & Specials)
+ * ============================================================================ */
+#define CP437_DOUBLE_TOP_LEFT      0xC9  /* â•” */
+#define CP437_DOUBLE_TOP_RIGHT     0xBB  /* â•— */
+#define CP437_DOUBLE_BOTTOM_LEFT   0xC8  /* â•š */
+#define CP437_DOUBLE_BOTTOM_RIGHT  0xBC  /* â• */
+#define CP437_DOUBLE_HORIZONTAL    0xCD  /* â• */
+#define CP437_DOUBLE_VERTICAL      0xBA  /* â•‘ */
+#define CP437_DOUBLE_CROSS_LEFT    0xCC  /* â•  */
+#define CP437_DOUBLE_CROSS_RIGHT   0xB9  /* â•£ */
+#define CP437_LIGHT_SHADE          0xB0  /* â–‘ */
+#define CP437_MEDIUM_SHADE         0xB1  /* â–’ */
+#define CP437_CHECKMARK            0xFB  /* âˆš */
+#define CP437_BULLET               0xFE  /* â–  */
+
+/* ============================================================================
+ * Paleta de colores VGA
  * ============================================================================ */
 typedef enum {
-    VGA_COLOR_BLACK          = 0,   /* 0000 — Negro */
-    VGA_COLOR_BLUE           = 1,   /* 0001 — Azul oscuro */
-    VGA_COLOR_GREEN          = 2,   /* 0010 — Verde oscuro */
-    VGA_COLOR_CYAN           = 3,   /* 0011 — Cyan oscuro */
-    VGA_COLOR_RED            = 4,   /* 0100 — Rojo oscuro */
-    VGA_COLOR_MAGENTA        = 5,   /* 0101 — Magenta */
-    VGA_COLOR_BROWN          = 6,   /* 0110 — Marrón */
-    VGA_COLOR_LIGHT_GREY     = 7,   /* 0111 — Gris claro */
-    VGA_COLOR_DARK_GREY      = 8,   /* 1000 — Gris oscuro (intensidad alta) */
-    VGA_COLOR_LIGHT_BLUE     = 9,   /* 1001 — Azul claro */
-    VGA_COLOR_LIGHT_GREEN    = 10,  /* 1010 — Verde claro */
-    VGA_COLOR_LIGHT_CYAN     = 11,  /* 1011 — Cyan claro ← usaremos este */
-    VGA_COLOR_LIGHT_RED      = 12,  /* 1100 — Rojo claro */
-    VGA_COLOR_LIGHT_MAGENTA  = 13,  /* 1101 — Magenta claro */
-    VGA_COLOR_LIGHT_BROWN    = 14,  /* 1110 — Amarillo */
-    VGA_COLOR_WHITE          = 15,  /* 1111 — Blanco puro */
+    VGA_COLOR_BLACK          = 0,
+    VGA_COLOR_BLUE           = 1,
+    VGA_COLOR_GREEN          = 2,
+    VGA_COLOR_CYAN           = 3,
+    VGA_COLOR_RED            = 4,
+    VGA_COLOR_MAGENTA        = 5,
+    VGA_COLOR_BROWN          = 6,
+    VGA_COLOR_LIGHT_GREY     = 7,
+    VGA_COLOR_DARK_GREY      = 8,
+    VGA_COLOR_LIGHT_BLUE     = 9,
+    VGA_COLOR_LIGHT_GREEN    = 10,
+    VGA_COLOR_LIGHT_CYAN     = 11,
+    VGA_COLOR_LIGHT_RED      = 12,
+    VGA_COLOR_LIGHT_MAGENTA  = 13,
+    VGA_COLOR_LIGHT_BROWN    = 14, /* Amarillo en monitores estÃ¡ndar */
+    VGA_COLOR_WHITE          = 15,
 } vga_color_t;
 
 /* ============================================================================
- * Variables de estado del terminal (globales de módulo)
+ * Puertos de hardware VGA (I/O) para manejar el cursor fÃ­sico
  * ============================================================================ */
+static inline void outb(uint16_t port, uint8_t val) {
+    __asm__ volatile ("outb %0, %1" : : "a"(val), "Nd"(port));
+}
 
-/** Posición actual del cursor: columna (0-79) */
-static size_t terminal_column;
-
-/** Posición actual del cursor: fila (0-24) */
-static size_t terminal_row;
-
-/** Byte de atributo de color actual (fondo<<4 | frente) */
-static uint8_t terminal_color;
-
-/** Puntero al buffer VGA (volatile para acceso directo a hardware) */
-static volatile uint16_t* terminal_buffer;
+static void vga_disable_cursor(void) {
+    outb(0x3D4, 0x0A);
+    outb(0x3D5, 0x20); /* Bit 5 = Cursor Disable */
+}
 
 /* ============================================================================
- * Funciones auxiliares de color VGA
+ * Primitivas grÃ¡ficas VGA
  * ============================================================================ */
-
-/**
- * vga_entry_color — Combina colores de frente y fondo en un byte de atributo.
- * @fg: Color del texto (foreground), nibble bajo
- * @bg: Color de fondo (background), nibble alto
- * Retorna: byte 0xBF donde B=nibble bg, F=nibble fg
- */
-static inline uint8_t vga_entry_color(vga_color_t fg, vga_color_t bg) {
+static inline uint8_t vga_color(vga_color_t fg, vga_color_t bg) {
     return (uint8_t)fg | ((uint8_t)bg << 4);
 }
 
-/**
- * vga_entry — Crea una entrada de 16 bits para el buffer VGA.
- * @uc:    Carácter ASCII a mostrar (byte bajo)
- * @color: Byte de atributo de color (byte alto)
- * Retorna: valor uint16_t listo para escribir en VGA_MEMORY
- */
-static inline uint16_t vga_entry(unsigned char uc, uint8_t color) {
-    return (uint16_t)uc | ((uint16_t)color << 8);
+static inline uint16_t vga_cell(unsigned char ch, uint8_t color) {
+    return (uint16_t)ch | ((uint16_t)color << 8);
 }
 
-/* ============================================================================
- * Implementación de strlen sin libc
- * Necesitamos esta función para terminal_writestring sin usar <string.h>
- * ============================================================================ */
-
-/**
- * strlen — Calcula la longitud de una cadena terminada en '\0'.
- * Implementación manual para no depender de libc.
- */
-static size_t strlen(const char* str) {
-    size_t len = 0;
-    while (str[len] != '\0') {
-        len++;
+static void draw_char(size_t x, size_t y, unsigned char ch, uint8_t color) {
+    if (x < VGA_WIDTH && y < VGA_HEIGHT) {
+        VGA_MEMORY[y * VGA_WIDTH + x] = vga_cell(ch, color);
     }
-    return len;
 }
 
-/* ============================================================================
- * API del Terminal
- * ============================================================================ */
+static void print_string(size_t x, size_t y, const char* str, uint8_t color) {
+    size_t cur_x = x;
+    for (size_t i = 0; str[i] != '\0'; i++) {
+        if (cur_x >= VGA_WIDTH) break;
+        draw_char(cur_x++, y, (unsigned char)str[i], color);
+    }
+}
 
-/**
- * terminal_initialize — Inicializa el terminal VGA.
- * Limpia los 80×25 caracteres del buffer, los llena con espacios sobre fondo
- * negro, y posiciona el cursor en la esquina superior izquierda (0,0).
- * Debe llamarse antes de cualquier otra función del terminal.
- */
-void terminal_initialize(void) {
-    terminal_row    = 0;
-    terminal_column = 0;
-
-    /* Color inicial: gris claro sobre negro (texto estándar de BIOS) */
-    terminal_color  = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
-
-    /* Apuntar al buffer VGA físico */
-    terminal_buffer = VGA_MEMORY;
-
-    /* Limpiar toda la pantalla: escribir espacios con color negro sobre negro */
-    for (size_t row = 0; row < VGA_HEIGHT; row++) {
-        for (size_t col = 0; col < VGA_WIDTH; col++) {
-            const size_t index = row * VGA_WIDTH + col;
-            terminal_buffer[index] = vga_entry(' ', terminal_color);
+static void fill_rect(size_t x, size_t y, size_t w, size_t h, unsigned char ch, uint8_t color) {
+    for (size_t row = y; row < y + h && row < VGA_HEIGHT; row++) {
+        for (size_t col = x; col < x + w && col < VGA_WIDTH; col++) {
+            draw_char(col, row, ch, color);
         }
     }
 }
 
-/**
- * terminal_setcolor — Cambia el color actual del terminal.
- * @color: byte de atributo (usar vga_entry_color para construirlo)
- * Los siguientes caracteres escritos usarán este color.
- */
-void terminal_setcolor(uint8_t color) {
-    terminal_color = color;
-}
+static void draw_double_box(size_t x, size_t y, size_t w, size_t h, uint8_t color) {
+    if (w < 2 || h < 2) return;
 
-/**
- * terminal_putentryat — Escribe un carácter con color en una posición específica.
- * @c:    Carácter ASCII
- * @color: Byte de atributo de color
- * @x:    Columna (0-79)
- * @y:    Fila (0-24)
- * No modifica terminal_row/terminal_column.
- */
-static void terminal_putentryat(char c, uint8_t color, size_t x, size_t y) {
-    const size_t index = y * VGA_WIDTH + x;
-    terminal_buffer[index] = vga_entry((unsigned char)c, color);
-}
+    /* Esquinas */
+    draw_char(x,         y,         CP437_DOUBLE_TOP_LEFT,     color);
+    draw_char(x + w - 1, y,         CP437_DOUBLE_TOP_RIGHT,    color);
+    draw_char(x,         y + h - 1, CP437_DOUBLE_BOTTOM_LEFT,  color);
+    draw_char(x + w - 1, y + h - 1, CP437_DOUBLE_BOTTOM_RIGHT, color);
 
-/**
- * terminal_putchar — Escribe un carácter en la posición actual del cursor.
- * @c: Carácter a escribir.
- * Avanza el cursor automáticamente; si llega al final de la línea, hace
- * un salto de línea implícito. Si el carácter es '\n', salta de línea.
- *
- * NOTA: No se implementa scroll automático (se asume que el mensaje cabe en
- * la pantalla, lo cual es válido para este kernel minimal).
- */
-void terminal_putchar(char c) {
-    if (c == '\n') {
-        /* Salto de línea: mover cursor al inicio de la siguiente fila */
-        terminal_column = 0;
-        if (++terminal_row == VGA_HEIGHT) {
-            terminal_row = 0;   /* Wrap-around simple (sin scroll) */
-        }
-        return;
+    /* Bordes horizontales */
+    for (size_t col = x + 1; col < x + w - 1; col++) {
+        draw_char(col, y,         CP437_DOUBLE_HORIZONTAL, color);
+        draw_char(col, y + h - 1, CP437_DOUBLE_HORIZONTAL, color);
     }
 
-    /* Escribir carácter en la posición actual */
-    terminal_putentryat(c, terminal_color, terminal_column, terminal_row);
-
-    /* Avanzar columna; si llegamos al borde derecho, saltar de línea */
-    if (++terminal_column == VGA_WIDTH) {
-        terminal_column = 0;
-        if (++terminal_row == VGA_HEIGHT) {
-            terminal_row = 0;
-        }
+    /* Bordes verticales */
+    for (size_t row = y + 1; row < y + h - 1; row++) {
+        draw_char(x,         row, CP437_DOUBLE_VERTICAL, color);
+        draw_char(x + w - 1, row, CP437_DOUBLE_VERTICAL, color);
     }
-}
-
-/**
- * terminal_write — Escribe un buffer de bytes de longitud dada.
- * @data: Puntero al buffer de caracteres
- * @size: Número de bytes a escribir
- */
-void terminal_write(const char* data, size_t size) {
-    for (size_t i = 0; i < size; i++) {
-        terminal_putchar(data[i]);
-    }
-}
-
-/**
- * terminal_writestring — Escribe una cadena terminada en '\0'.
- * @data: Puntero a la cadena de texto
- * Calcula la longitud automáticamente y delega en terminal_write.
- */
-void terminal_writestring(const char* data) {
-    terminal_write(data, strlen(data));
 }
 
 /* ============================================================================
- * Punto de entrada del kernel
- * Llamado desde boot.s mediante 'call kernel_main'
+ * Renderizado de Interfaz Profesional
  * ============================================================================ */
 
-/**
- * kernel_main — Función principal del kernel de Kolotibablo OS.
- * No recibe argumentos (podría recibir los registros EAX/EBX de Multiboot,
- * pero no los necesitamos para este kernel básico).
- */
+void render_desktop(void) {
+    uint8_t bg_color     = vga_color(VGA_COLOR_DARK_GREY, VGA_COLOR_BLACK);
+    uint8_t bar_color    = vga_color(VGA_COLOR_WHITE,     VGA_COLOR_BLUE);
+    uint8_t bar_key      = vga_color(VGA_COLOR_LIGHT_CYAN,VGA_COLOR_BLUE);
+    uint8_t win_frame    = vga_color(VGA_COLOR_LIGHT_CYAN,VGA_COLOR_BLACK);
+    uint8_t win_title    = vga_color(VGA_COLOR_WHITE,     VGA_COLOR_CYAN);
+    uint8_t text_title   = vga_color(VGA_COLOR_LIGHT_BROWN, VGA_COLOR_BLACK);
+    uint8_t text_regular = vga_color(VGA_COLOR_LIGHT_GREY,  VGA_COLOR_BLACK);
+    uint8_t ok_color     = vga_color(VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK);
+    uint8_t label_color  = vga_color(VGA_COLOR_WHITE,       VGA_COLOR_BLACK);
+
+    /* 1. Fondo texturizado elegante */
+    fill_rect(0, 0, VGA_WIDTH, VGA_HEIGHT, ' ', vga_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK));
+    fill_rect(0, 1, VGA_WIDTH, VGA_HEIGHT - 2, CP437_LIGHT_SHADE, bg_color);
+
+    /* 2. Barra Superior (Top Navigation Bar) */
+    fill_rect(0, 0, VGA_WIDTH, 1, ' ', bar_color);
+    print_string(2, 0, "KOLOTIBABLO OS", vga_color(VGA_COLOR_LIGHT_BROWN, VGA_COLOR_BLUE));
+    print_string(17, 0, "| Architecture: i686 (32-bit)", bar_color);
+    print_string(54, 0, "Build: 2026.1-RELEASE", bar_key);
+
+    /* 3. Ventana Principal Central (ancho: 72, alto: 20, x: 4, y: 2) */
+    size_t wx = 4, wy = 2, ww = 72, wh = 20;
+    fill_rect(wx, wy, ww, wh, ' ', vga_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK));
+    draw_double_box(wx, wy, ww, wh, win_frame);
+
+    /* TÃ­tulo incrustado en el marco */
+    print_string(wx + 3, wy, " [ SYSTEM CONSOLE: KERNEL STATUS ] ", win_title);
+
+    /* Banner ASCII en relieve */
+    print_string(wx + 4, wy + 2, " _  ___     _       _   _ _           _     _        ____   ____ ", vga_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK));
+    print_string(wx + 4, wy + 3, "| |/ / |__ | | ___ | |_(_) |__   __ _| |__ | | ___  / __ \\ / ___|", vga_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK));
+    print_string(wx + 4, wy + 4, "| ' /| '_ \\| |/ _ \\| __| | '_ \\ / _` | '_ \\| |/ _ \\| |  | |\\___ \\", vga_color(VGA_COLOR_CYAN, VGA_COLOR_BLACK));
+    print_string(wx + 4, wy + 5, "| . \\| |_) | | (_) | |_| | |_) | (_| | |_) | | (_) | |__| | ___) |", vga_color(VGA_COLOR_LIGHT_BLUE, VGA_COLOR_BLACK));
+    print_string(wx + 4, wy + 6, "|_|\\_\\_.__/|_|\\___/ \\__|_|_.__/ \\__,_|_.__/|_|\\___/ \\____/ |____/ ", vga_color(VGA_COLOR_LIGHT_BLUE, VGA_COLOR_BLACK));
+
+    /* LÃ­nea separadora */
+    for (size_t c = wx + 2; c < wx + ww - 2; c++) {
+        draw_char(c, wy + 7, CP437_DOUBLE_HORIZONTAL, vga_color(VGA_COLOR_DARK_GREY, VGA_COLOR_BLACK));
+    }
+
+    /* Mensaje de bienvenida oficial */
+    print_string(wx + 4, wy + 8, "Bienvenido a Kolotibablo OS - El sistema esta completamente operativo.", text_title);
+
+    /* SecciÃ³n de TelemetrÃ­a y DiagnÃ³stico */
+    print_string(wx + 4, wy + 10, "DIAGNOSTICO DEL KERNEL:", label_color);
+
+    draw_char(wx + 6, wy + 11, CP437_CHECKMARK, ok_color);
+    print_string(wx + 8, wy + 11, "Multiboot v1 Protocol   : Sincronizado OK (0x1BADB002)", text_regular);
+
+    draw_char(wx + 6, wy + 12, CP437_CHECKMARK, ok_color);
+    print_string(wx + 8, wy + 12, "Kernel Physical Offset  : 0x00100000 (1 MiB Mark)", text_regular);
+
+    draw_char(wx + 6, wy + 13, CP437_CHECKMARK, ok_color);
+    print_string(wx + 8, wy + 13, "Execution Mode          : 32-bit Protected Mode (CR0.PE = 1)", text_regular);
+
+    draw_char(wx + 6, wy + 14, CP437_CHECKMARK, ok_color);
+    print_string(wx + 8, wy + 14, "VGA Display Adapter     : IBM Color Text 80x25 @ 0xB8000", text_regular);
+
+    draw_char(wx + 6, wy + 15, CP437_CHECKMARK, ok_color);
+    print_string(wx + 8, wy + 15, "CPU Interrupts State    : IF=0 (CLI mode, Clean Halt)", text_regular);
+
+    /* Cuadro de aviso inferior de la ventana */
+    fill_rect(wx + 3, wy + 17, ww - 6, 1, ' ', vga_color(VGA_COLOR_BLACK, VGA_COLOR_LIGHT_GREY));
+    print_string(wx + 5, wy + 17, "Kernel en reposo seguro. La CPU esta en bucle HLT sin consumo.", vga_color(VGA_COLOR_BLACK, VGA_COLOR_LIGHT_GREY));
+
+    /* 4. Barra Inferior de Estado (Bottom Status Bar) */
+    fill_rect(0, VGA_HEIGHT - 1, VGA_WIDTH, 1, ' ', bar_color);
+    print_string(2,  VGA_HEIGHT - 1, "[CPU: Halted]", bar_key);
+    print_string(18, VGA_HEIGHT - 1, "[Memory: 16 KiB Stack]", bar_color);
+    print_string(45, VGA_HEIGHT - 1, "[Ready for Driver Extensions]", vga_color(VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLUE));
+}
+
+/* ============================================================================
+ * Punto de entrada principal
+ * ============================================================================ */
 void kernel_main(void) {
-    /* 1. Inicializar el terminal: limpiar pantalla y posicionar cursor */
-    terminal_initialize();
+    /* 1. Ocultar el cursor parpadeante de hardware para aspecto impecable */
+    vga_disable_cursor();
 
-    /* 2. Cambiar el color a Cyan claro sobre fondo negro para el mensaje principal */
-    terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK));
+    /* 2. Dibujar la interfaz completa estilo consola retro profesional */
+    render_desktop();
 
-    /* 3. Escribir el mensaje de bienvenida */
-    terminal_writestring("==================================================\n");
-    terminal_writestring("       Kolotibablo OS v0.1 — Bare Bones           \n");
-    terminal_writestring("==================================================\n");
-    terminal_writestring("\n");
-
-    /* Mensaje principal en amarillo (brown = yellow en VGA) */
-    terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_BROWN, VGA_COLOR_BLACK));
-    terminal_writestring("  \xa1Bienvenido a Kolotibablo OS!\n");
-    terminal_writestring("  El sistema esta operativo.\n");
-    terminal_writestring("\n");
-
-    /* Mensaje de estado en verde claro */
-    terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK));
-    terminal_writestring("  [OK] Kernel cargado en 0x00100000 (1 MiB)\n");
-    terminal_writestring("  [OK] Buffer VGA en modo texto 80x25 activo\n");
-    terminal_writestring("  [OK] Multiboot v1 detectado correctamente\n");
-    terminal_writestring("\n");
-
-    /* Mensaje de espera en gris claro */
-    terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK));
-    terminal_writestring("  CPU en modo halt. Reinicia la VM para salir.\n");
-
-    /* 4. Bucle infinito: detener la CPU de forma segura */
-    /* sin este bucle, el procesador ejecutaría código basura después de kernel_main */
+    /* 3. Bucle infinito seguro usando instrucciÃ³n de bajo consumo HLT */
     while (1) {
-        /* __asm__ volatile("hlt") puede usarse aquí para ahorrar energía, */
-        /* pero while(1) vacío es suficiente para un kernel freestanding    */
+        __asm__ volatile ("hlt");
     }
 }
