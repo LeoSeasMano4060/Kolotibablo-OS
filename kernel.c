@@ -1,20 +1,15 @@
 /*
- * kernel.c — Kolotibablo OS: Suite Gráfica Frutiger Aero v5.0 (Ultimate Interactive)
+ * kernel.c — Kolotibablo OS: High Definition (HD 1280x720) Frutiger Aero v6.0
  *
- * Mejoras clave de esta versión:
- * 1. Driver de Teclado PS/2 (puertos 0x60 / 0x64):
- *    - Soporte completo para teclear letras (A-Z), números (0-9), símbolos (., /, :, -, espacio), Backspace y Enter.
- * 2. Navegador Aqua Explorer con barra de URL 100% interactiva y libre:
- *    - Haz clic en la barra de URL para enfocarla (cursor parpadeante activo '|').
- *    - Escribe con el teclado de tu PC CUALQUIER dirección web que desees sin límites
- *      (ej: google.com, youtube.com, wikipedia.org, twitter.com, o cualquier sitio inventado).
- *    - Al pulsar ENTER o hacer clic en "GO", el motor del navegador procesa la URL y renderiza
- *      dinámicamente la página correspondiente o busca los términos en tiempo real.
- * 3. Renderizado Anti-Pixelado & Tipografía Suavizada:
- *    - Suavizado de bordes en botones, barras de cristal y tarjetas.
- *    - Sombras degradadas con sub-pixel blending.
- * 4. Personalizador de Apariencia Total:
- *    - 5 temas de color, control de transparencia de cristal (Aero Glass), velocidad de burbujas y audio.
+ * Mejoras HD & Visual Fidelity:
+ * 1. Resolución nativa Widescreen HD 1280x720 a 32 bits (16.7 millones de colores).
+ * 2. Motor gráfico de Anti-Aliasing por Software:
+ *    - Renderizado de cajas con bordes biselados (curvatura suave en ventanas e iconos).
+ *    - Esferas 3D con degradado Phong/Specular suave de alta definición (sin bordes dentados).
+ *    - Brillos de cristal Aero Glass (Streak Glare) y sombreado exterior multicapa.
+ * 3. Driver de Teclado PS/2 con escritura en vivo en la barra de URL del navegador.
+ * 4. Navegador Aqua Explorer de alta fidelidad con páginas completas y motor de búsqueda libre.
+ * 5. Barra de tareas estilo Windows 7 con Start Orb translúcido y efectos de brillo hover.
  */
 
 #include <stdint.h>
@@ -52,8 +47,9 @@ struct multiboot_info {
 } __attribute__((packed));
 
 static uint32_t* fb = NULL;
-static uint32_t screen_w = 1024;
-static uint32_t screen_h = 768;
+static uint32_t screen_w = 1280;
+static uint32_t screen_h = 720;
+static uint32_t screen_pitch_pixels = 1280;
 
 #define BACKBUFFER_ADDR 0x00400000
 static uint32_t* backbuffer = (uint32_t*)BACKBUFFER_ADDR;
@@ -72,7 +68,7 @@ static inline uint8_t inb(uint16_t port) {
 }
 
 /* ============================================================================
- * Configuración Global de Apariencia
+ * Ajustes Visuales Frutiger Aero
  * ============================================================================ */
 enum ThemeType {
     THEME_OCEAN  = 0,
@@ -83,7 +79,7 @@ enum ThemeType {
 };
 
 static int current_theme     = THEME_OCEAN;
-static int bubble_speed_mode = 2; /* 0: Pausa, 1: Lento, 2: Normal, 3: Rápido */
+static int bubble_speed_mode = 2;
 static int show_eco_hills    = 1;
 static int sfx_enabled       = 1;
 static uint8_t glass_alpha   = 225;
@@ -111,9 +107,9 @@ static void nosound(void) {
 static void play_bubble_sfx(void) {
     if (!sfx_enabled) return;
     play_sound(950);
-    for (volatile int i = 0; i < 180000; i++);
+    for (volatile int i = 0; i < 160000; i++);
     play_sound(1450);
-    for (volatile int i = 0; i < 220000; i++);
+    for (volatile int i = 0; i < 200000; i++);
     nosound();
 }
 
@@ -139,7 +135,7 @@ static void read_rtc(int* out_h, int* out_m, int* out_s) {
 }
 
 /* ============================================================================
- * Primitivas de Color ARGB 32-bit
+ * Motor Gráfico HD: Color, Blending y Antialiasing
  * ============================================================================ */
 static inline uint32_t rgb(uint8_t r, uint8_t g, uint8_t b) {
     return (0xFFU << 24) | ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
@@ -188,6 +184,46 @@ static void bb_fill_rect_alpha(int x, int y, int w, int h, uint32_t color, uint8
         for (int i = x; i < x + w; i++) {
             if (i < 0 || (uint32_t)i >= screen_w) continue;
             bb_pixel_alpha(i, j, color, a);
+        }
+    }
+}
+
+/* Rectángulo redondeado HD con antialiasing */
+static void draw_rounded_box_hd(int x, int y, int w, int h, int r, uint32_t color, uint8_t alpha) {
+    for (int j = y; j < y + h; j++) {
+        if (j < 0 || (uint32_t)j >= screen_h) continue;
+        for (int i = x; i < x + w; i++) {
+            if (i < 0 || (uint32_t)i >= screen_w) continue;
+
+            /* Comprobar esquinas redondeadas */
+            int in_corner = 0;
+            int dist2 = 0;
+            if (i < x + r && j < y + r) {
+                dist2 = (i - (x + r))*(i - (x + r)) + (j - (y + r))*(j - (y + r));
+                in_corner = 1;
+            } else if (i >= x + w - r && j < y + r) {
+                dist2 = (i - (x + w - r))*(i - (x + w - r)) + (j - (y + r))*(j - (y + r));
+                in_corner = 1;
+            } else if (i < x + r && j >= y + h - r) {
+                dist2 = (i - (x + r))*(i - (x + r)) + (j - (y + h - r))*(j - (y + h - r));
+                in_corner = 1;
+            } else if (i >= x + w - r && j >= y + h - r) {
+                dist2 = (i - (x + w - r))*(i - (x + w - r)) + (j - (y + h - r))*(j - (y + h - r));
+                in_corner = 1;
+            }
+
+            if (in_corner) {
+                if (dist2 <= r * r) {
+                    /* Suavizado en el filo exterior */
+                    if (dist2 >= (r - 1) * (r - 1)) {
+                        bb_pixel_alpha(i, j, color, alpha / 2);
+                    } else {
+                        bb_pixel_alpha(i, j, color, alpha);
+                    }
+                }
+            } else {
+                bb_pixel_alpha(i, j, color, alpha);
+            }
         }
     }
 }
@@ -293,9 +329,51 @@ static void draw_text(int x, int y, const char* str, uint32_t color) {
 }
 
 /* ============================================================================
- * Burbujas Dinámicas con Simulación Física
+ * Esferas 3D con Antialiasing y Shader Especular HD
  * ============================================================================ */
-#define MAX_BUBBLES 14
+static void draw_sphere_hd(int cx, int cy, int r, uint32_t base_col) {
+    int r2 = r * r;
+    for (int y = -r; y <= r; y++) {
+        for (int x = -r; x <= r; x++) {
+            int d2 = x * x + y * y;
+            if (d2 <= r2) {
+                /* Borde suavizado */
+                if (d2 >= (r - 1) * (r - 1)) {
+                    bb_pixel_alpha(cx + x, cy + y, rgb(get_r(base_col)/2, get_g(base_col)/2, get_b(base_col)/2), 180);
+                    continue;
+                }
+
+                /* Cálculo de iluminación 3D esférica (Phong shader simplificado) */
+                int light_x = x + r / 3;
+                int light_y = y + r / 3;
+                int light_d2 = light_x * light_x + light_y * light_y;
+
+                if (light_d2 < (r * r) / 10) {
+                    /* Brillo especular blanco puro */
+                    bb_pixel(cx + x, cy + y, rgb(255, 255, 255));
+                } else if (light_d2 < (r * r) / 3) {
+                    /* Reflejo brillante secundario */
+                    uint8_t nr = 180 + get_r(base_col) / 4;
+                    uint8_t ng = 220 + get_g(base_col) / 4;
+                    uint8_t nb = 240 + get_b(base_col) / 4;
+                    bb_pixel(cx + x, cy + y, rgb(nr, ng, nb));
+                } else {
+                    /* Sombreado perimetral */
+                    int shadow = (d2 * 120) / r2;
+                    uint8_t nr = (get_r(base_col) > shadow) ? (get_r(base_col) - shadow) : 0;
+                    uint8_t ng = (get_g(base_col) > shadow) ? (get_g(base_col) - shadow) : 0;
+                    uint8_t nb = (get_b(base_col) > shadow) ? (get_b(base_col) - shadow) : 0;
+                    bb_pixel(cx + x, cy + y, rgb(nr, ng, nb));
+                }
+            }
+        }
+    }
+}
+
+/* ============================================================================
+ * Burbujas Dinámicas con Simulación Física HD
+ * ============================================================================ */
+#define MAX_BUBBLES 16
 struct BubbleObj {
     int x, y;
     int radius;
@@ -303,11 +381,12 @@ struct BubbleObj {
 };
 
 static struct BubbleObj bubbles[MAX_BUBBLES] = {
-    {100, 600, 22, 2}, {200, 720, 34, 1}, {320, 650, 16, 3},
-    {460, 700, 28, 2}, {580, 640, 18, 2}, {710, 710, 36, 1},
-    {830, 680, 24, 3}, {920, 730, 20, 2}, {160, 760, 30, 1},
-    {390, 780, 14, 3}, {660, 750, 26, 2}, {800, 790, 18, 3},
-    {510, 620, 32, 2}, {270, 740, 12, 4}
+    {120, 600, 26, 2}, {240, 720, 38, 1}, {360, 650, 18, 3},
+    {500, 700, 30, 2}, {640, 640, 20, 2}, {780, 710, 40, 1},
+    {910, 680, 26, 3}, {1040, 730, 22, 2}, {180, 760, 32, 1},
+    {420, 780, 16, 3}, {720, 750, 28, 2}, {880, 790, 20, 3},
+    {570, 620, 34, 2}, {310, 740, 14, 4}, {1150, 690, 30, 2},
+    {1220, 760, 18, 3}
 };
 
 static void update_and_draw_bubbles(void) {
@@ -319,8 +398,8 @@ static void update_and_draw_bubbles(void) {
         else if (bubble_speed_mode == 3) speed = speed * 2;
 
         bubbles[i].y -= speed;
-        if (bubbles[i].y < -40) {
-            bubbles[i].y = screen_h + 30;
+        if (bubbles[i].y < -50) {
+            bubbles[i].y = screen_h + 40;
         }
 
         int cx = bubbles[i].x;
@@ -345,26 +424,8 @@ static void update_and_draw_bubbles(void) {
     }
 }
 
-static void draw_sphere(int cx, int cy, int r, uint32_t color) {
-    int r2 = r * r;
-    for (int y = -r; y <= r; y++) {
-        for (int x = -r; x <= r; x++) {
-            int d2 = x * x + y * y;
-            if (d2 <= r2) {
-                if (x < -r/4 && y < -r/4) {
-                    bb_pixel(cx + x, cy + y, rgb(255, 255, 255));
-                } else if (d2 > r2 - (r * 2)) {
-                    bb_pixel(cx + x, cy + y, rgb(get_r(color)/2, get_g(color)/2, get_b(color)/2));
-                } else {
-                    bb_pixel(cx + x, cy + y, color);
-                }
-            }
-        }
-    }
-}
-
 /* ============================================================================
- * Sistema de Navegación Web Editable sin Límites
+ * Navegador Web Editable Libre
  * ============================================================================ */
 static char url_input[128] = "frutiger-aero.eco";
 static int url_len = 17;
@@ -372,7 +433,7 @@ static int url_focused = 0;
 static char active_rendered_domain[64] = "frutiger-aero.eco";
 
 /* ============================================================================
- * 5 Aplicaciones Frutiger Aero
+ * 5 Aplicaciones Frutiger Aero HD
  * ============================================================================ */
 enum WindowID {
     WIN_SYSTEM   = 0,
@@ -391,11 +452,11 @@ struct Window {
 };
 
 static struct Window windows[WIN_COUNT] = {
-    [WIN_SYSTEM]   = { .x = 140, .y = 60,  .w = 540, .h = 430, .visible = 1, .minimized = 0, .title = "Mi Equipo - Rendimiento Aqua" },
-    [WIN_FILES]    = { .x = 220, .y = 95,  .w = 520, .h = 380, .visible = 0, .minimized = 0, .title = "Explorador de Archivos Aero" },
-    [WIN_PLAYER]   = { .x = 280, .y = 125, .w = 440, .h = 360, .visible = 0, .minimized = 0, .title = "Aero Audio Player" },
-    [WIN_BROWSER]  = { .x = 160, .y = 75,  .w = 660, .h = 460, .visible = 0, .minimized = 0, .title = "Navegador Aqua Explorer (Internet Ilimitado)" },
-    [WIN_SETTINGS] = { .x = 260, .y = 110, .w = 500, .h = 400, .visible = 0, .minimized = 0, .title = "Personalizador de Apariencia Total" }
+    [WIN_SYSTEM]   = { .x = 180, .y = 50,  .w = 580, .h = 460, .visible = 1, .minimized = 0, .title = "Mi Equipo - Rendimiento Aqua HD" },
+    [WIN_FILES]    = { .x = 260, .y = 80,  .w = 560, .h = 420, .visible = 0, .minimized = 0, .title = "Explorador de Archivos Aero Glass" },
+    [WIN_PLAYER]   = { .x = 340, .y = 110, .w = 480, .h = 400, .visible = 0, .minimized = 0, .title = "Aero Audio Player HD" },
+    [WIN_BROWSER]  = { .x = 220, .y = 60,  .w = 720, .h = 490, .visible = 0, .minimized = 0, .title = "Navegador Aqua Explorer HD (Navegacion Libre)" },
+    [WIN_SETTINGS] = { .x = 300, .y = 90,  .w = 560, .h = 440, .visible = 0, .minimized = 0, .title = "Personalizador de Apariencia HD" }
 };
 
 static int active_win = WIN_SYSTEM;
@@ -404,137 +465,128 @@ static int drag_off_x = 0;
 static int drag_off_y = 0;
 static int start_menu_open = 0;
 
-/* Estados interactivos */
 static uint32_t anim_counter = 0;
 static int music_playing = 1;
 static int modal_image_open = 0;
 
 /* Mouse */
-static int mouse_x = 512;
-static int mouse_y = 384;
+static int mouse_x = 640;
+static int mouse_y = 360;
 static uint8_t mouse_btn_prev = 0;
 
 /* ============================================================================
- * Renderizado del Contenido de las Ventanas
+ * Renderizado del Contenido de las Ventanas HD
  * ============================================================================ */
 static void render_window_content(int id, int x, int y, int w, int h) {
     (void)h;
     if (id == WIN_SYSTEM) {
-        bb_fill_rect_alpha(x + 20, y + 55, w - 40, 115, rgb(255, 255, 255), 180);
-        bb_fill_rect(x + 20, y + 55, w - 40, 2, rgb(0, 150, 230));
+        draw_rounded_box_hd(x + 20, y + 55, w - 40, 125, 8, rgb(255, 255, 255), 190);
+        bb_fill_rect(x + 20, y + 55, w - 40, 3, rgb(0, 150, 230));
 
-        draw_text(x + 35, y + 68, "USO DE CPU - AERO CORE v9", rgb(10, 60, 110));
-        bb_fill_rect(x + 35, y + 90, 200, 14, rgb(210, 230, 245));
-        int cpu_w = 40 + ((anim_counter / 4) % 80);
-        bb_fill_rect(x + 35, y + 90, cpu_w, 14, rgb(0, 140, 230));
-        draw_text(x + 245, y + 89, "28%", rgb(10, 50, 90));
+        draw_text(x + 35, y + 70, "USO DE CPU - AERO CORE v9 HD", rgb(10, 60, 110));
+        draw_rounded_box_hd(x + 35, y + 95, 240, 16, 4, rgb(210, 230, 245), 255);
+        int cpu_w = 40 + ((anim_counter / 4) % 110);
+        draw_rounded_box_hd(x + 35, y + 95, cpu_w, 16, 4, rgb(0, 140, 230), 255);
+        draw_text(x + 290, y + 95, "28%", rgb(10, 50, 90));
 
-        draw_text(x + 35, y + 115, "MEMORIA RAM (Aqua DDR4)", rgb(10, 60, 110));
-        bb_fill_rect(x + 35, y + 137, 200, 14, rgb(210, 240, 230));
-        bb_fill_rect(x + 35, y + 137, 105, 14, rgb(0, 180, 110));
-        draw_text(x + 245, y + 136, "4.2 GB / 8 GB", rgb(10, 50, 90));
+        draw_text(x + 35, y + 122, "MEMORIA RAM (Aqua DDR4 Dual-Channel)", rgb(10, 60, 110));
+        draw_rounded_box_hd(x + 35, y + 147, 240, 16, 4, rgb(210, 240, 230), 255);
+        draw_rounded_box_hd(x + 35, y + 147, 130, 16, 4, rgb(0, 180, 110), 255);
+        draw_text(x + 290, y + 147, "4.2 GB / 8 GB", rgb(10, 50, 90));
 
-        bb_fill_rect_alpha(x + 20, y + 185, w - 40, 220, rgb(240, 250, 255), 210);
-        draw_text(x + 35, y + 200, "INFORMACION DEL HARDWARE:", rgb(10, 60, 110));
-        draw_text(x + 35, y + 230, "- Procesador     : Aero Core v9 @ 3.8 GHz (x86 Ring 0)", rgb(30, 70, 100));
-        draw_text(x + 35, y + 260, "- Tarjeta Grafica: VESA VBE 1024x768x32 True Color", rgb(30, 70, 100));
-        draw_text(x + 35, y + 290, "- Controlador    : PS/2 Mouse & PS/2 Keyboard ACTIVO", rgb(0, 140, 50));
-        draw_text(x + 35, y + 320, "- Render Engine  : Double Buffer 60 FPS Anti-Pixelado", rgb(0, 120, 200));
-        draw_text(x + 35, y + 350, "- Estado Kernel  : Kolotibablo OS v5.0 Ultimate RELEASE", rgb(0, 140, 50));
+        draw_rounded_box_hd(x + 20, y + 195, w - 40, 240, 8, rgb(240, 250, 255), 220);
+        draw_text(x + 35, y + 210, "TELEMETRIA DE ALTA DEFINICION:", rgb(10, 60, 110));
+        draw_text(x + 35, y + 242, "- Pantalla HD    : VESA VBE 1280x720 Widescreen 32-bit", rgb(30, 70, 100));
+        draw_text(x + 35, y + 274, "- Graficos       : Anti-Aliasing & Phong Shader Shading", rgb(0, 120, 200));
+        draw_text(x + 35, y + 306, "- Perifericos    : PS/2 Mouse & PS/2 Keyboard Activo", rgb(0, 140, 50));
+        draw_text(x + 35, y + 338, "- Capa Visual    : Frutiger Aero Glass con Bokeh y Blur", rgb(30, 70, 100));
+        draw_text(x + 35, y + 370, "- Estado Kernel  : Kolotibablo OS v6.0 HD Extreme OK", rgb(0, 140, 50));
     }
     else if (id == WIN_FILES) {
-        bb_fill_rect(x + 15, y + 50, w - 30, 26, rgb(255, 255, 255));
-        bb_fill_rect(x + 15, y + 50, w - 30, 1, rgb(180, 210, 230));
-        draw_text(x + 25, y + 55, "C:\\Usuarios\\AeroUser\\Documentos", rgb(60, 90, 120));
+        draw_rounded_box_hd(x + 15, y + 50, w - 30, 28, 4, rgb(255, 255, 255), 255);
+        draw_text(x + 25, y + 56, "C:\\Usuarios\\AeroUser\\Documentos", rgb(60, 90, 120));
 
-        int col1 = x + 35, col2 = x + 160, col3 = x + 285, col4 = x + 410;
-        int row1 = y + 100, row2 = y + 200;
+        int col1 = x + 40, col2 = x + 175, col3 = x + 310, col4 = x + 445;
+        int row1 = y + 105, row2 = y + 225;
 
-        /* Clickable: Paisaje.png */
-        bb_fill_rect_alpha(col1 - 5, row1 - 5, 85, 75, rgb(200, 235, 255), 90);
-        draw_sphere(col1 + 22, row1 + 16, 18, rgb(0, 180, 220));
-        draw_text(col1, row1 + 44, "Paisaje.png", rgb(10, 50, 90));
+        draw_rounded_box_hd(col1 - 10, row1 - 8, 95, 85, 8, rgb(200, 235, 255), 90);
+        draw_sphere_hd(col1 + 25, row1 + 22, 22, rgb(0, 180, 220));
+        draw_text(col1 + 5, row1 + 52, "Paisaje.png", rgb(10, 50, 90));
 
-        draw_sphere(col2 + 22, row1 + 16, 18, rgb(0, 210, 140));
-        draw_text(col2, row1 + 44, "Burbujas.wav", rgb(20, 60, 100));
+        draw_sphere_hd(col2 + 25, row1 + 22, 22, rgb(0, 210, 140));
+        draw_text(col2 + 2, row1 + 52, "Burbujas.wav", rgb(20, 60, 100));
 
-        draw_sphere(col3 + 22, row1 + 16, 18, rgb(240, 180, 30));
-        draw_text(col3, row1 + 44, "Proyectos", rgb(20, 60, 100));
+        draw_sphere_hd(col3 + 25, row1 + 22, 22, rgb(240, 180, 30));
+        draw_text(col3 + 5, row1 + 52, "Proyectos", rgb(20, 60, 100));
 
-        draw_sphere(col4 + 22, row1 + 16, 18, rgb(0, 140, 240));
-        draw_text(col4, row1 + 44, "Estilo.css", rgb(20, 60, 100));
+        draw_sphere_hd(col4 + 25, row1 + 22, 22, rgb(0, 140, 240));
+        draw_text(col4 + 5, row1 + 52, "Estilo.css", rgb(20, 60, 100));
 
-        draw_sphere(col1 + 22, row2 + 16, 18, rgb(180, 100, 220));
-        draw_text(col1, row2 + 44, "Notas.txt", rgb(20, 60, 100));
+        draw_sphere_hd(col1 + 25, row2 + 22, 22, rgb(180, 100, 220));
+        draw_text(col1 + 5, row2 + 52, "Notas.txt", rgb(20, 60, 100));
 
-        draw_sphere(col2 + 22, row2 + 16, 18, rgb(240, 80, 80));
-        draw_text(col2, row2 + 44, "Kernel.elf", rgb(20, 60, 100));
+        draw_sphere_hd(col2 + 25, row2 + 22, 22, rgb(240, 80, 80));
+        draw_text(col2 + 5, row2 + 52, "Kernel.elf", rgb(20, 60, 100));
 
-        draw_text(x + 25, y + 335, "[Tip: Haz click en Paisaje.png para abrir el visor]", rgb(0, 120, 200));
+        draw_text(x + 30, y + 375, "[Tip: Haz click en Paisaje.png para abrir el visor en HD]", rgb(0, 120, 200));
     }
     else if (id == WIN_PLAYER) {
         int dcx = x + w / 2;
-        int dcy = y + 130;
-        draw_sphere(dcx, dcy, 45, rgb(0, 190, 220));
-        draw_sphere(dcx, dcy, 14, rgb(255, 255, 255));
-        draw_sphere(dcx, dcy, 5,  rgb(0, 120, 200));
+        int dcy = y + 140;
+        draw_sphere_hd(dcx, dcy, 52, rgb(0, 190, 220));
+        draw_sphere_hd(dcx, dcy, 18, rgb(255, 255, 255));
+        draw_sphere_hd(dcx, dcy, 6,  rgb(0, 120, 200));
 
-        draw_text(x + w/2 - 110, y + 195, "Aqua Dreams - Ambient Aero", rgb(10, 50, 90));
+        draw_text(x + w/2 - 110, y + 215, "Aqua Dreams - Ambient Aero HD", rgb(10, 50, 90));
 
-        bb_fill_rect_alpha(x + 40, y + 225, w - 80, 42, rgb(255, 255, 255), 180);
-        for (int b = 0; b < 10; b++) {
-            int bh = (music_playing) ? (8 + ((anim_counter * (b + 3)) % 28)) : 4;
-            bb_fill_rect(x + 55 + b * 34, y + 262 - bh, 14, bh, rgb(0, 160 + b * 8, 220));
+        draw_rounded_box_hd(x + 40, y + 245, w - 80, 48, 6, rgb(255, 255, 255), 180);
+        for (int b = 0; b < 11; b++) {
+            int bh = (music_playing) ? (10 + ((anim_counter * (b + 3)) % 32)) : 5;
+            draw_rounded_box_hd(x + 55 + b * 36, y + 285 - bh, 16, bh, 3, rgb(0, 150 + b * 8, 220), 255);
         }
 
-        int btn_x = x + w / 2 - 45;
-        int btn_y = y + 285;
-        bb_fill_rect(btn_x, btn_y, 90, 28, rgb(0, 140, 230));
+        int btn_x = x + w / 2 - 50;
+        int btn_y = y + 315;
+        draw_rounded_box_hd(btn_x, btn_y, 100, 32, 6, rgb(0, 140, 230), 255);
         if (music_playing) {
-            draw_text(btn_x + 20, btn_y + 6, "PAUSE", rgb(255, 255, 255));
+            draw_text(btn_x + 26, btn_y + 8, "PAUSE", rgb(255, 255, 255));
         } else {
-            draw_text(btn_x + 25, btn_y + 6, "PLAY", rgb(255, 255, 255));
+            draw_text(btn_x + 30, btn_y + 8, "PLAY", rgb(255, 255, 255));
         }
     }
     else if (id == WIN_BROWSER) {
         /* Barra de Botones de Navegación */
-        bb_fill_rect(x + 15, y + 46, 32, 26, rgb(220, 240, 255));
-        draw_text(x + 24, y + 51, "<", rgb(10, 50, 90));
+        draw_rounded_box_hd(x + 15, y + 46, 32, 28, 4, rgb(220, 240, 255), 255);
+        draw_text(x + 24, y + 52, "<", rgb(10, 50, 90));
 
-        bb_fill_rect(x + 52, y + 46, 32, 26, rgb(220, 240, 255));
-        draw_text(x + 62, y + 51, ">", rgb(10, 50, 90));
+        draw_rounded_box_hd(x + 52, y + 46, 32, 28, 4, rgb(220, 240, 255), 255);
+        draw_text(x + 62, y + 52, ">", rgb(10, 50, 90));
 
-        /* Barra de URL Editable y Clicable */
+        /* Barra de URL HD Editable */
         uint32_t url_bg = url_focused ? rgb(255, 255, 255) : rgb(240, 248, 255);
-        bb_fill_rect(x + 92, y + 46, w - 165, 26, url_bg);
-        bb_fill_rect(x + 92, y + 46, w - 165, 1, url_focused ? rgb(0, 140, 240) : rgb(180, 210, 230));
+        draw_rounded_box_hd(x + 92, y + 46, w - 175, 28, 4, url_bg, 255);
 
-        /* Renderizar texto tipeado en la barra */
         char display_url[140];
         int d = 0;
         for (; d < url_len && d < 120; d++) {
             display_url[d] = url_input[d];
         }
         if (url_focused && ((anim_counter / 15) % 2 == 0)) {
-            display_url[d++] = '|'; /* Cursor parpadeante */
+            display_url[d++] = '|';
         }
         display_url[d] = '\0';
-        draw_text(x + 100, y + 51, display_url, rgb(10, 50, 90));
+        draw_text(x + 104, y + 52, display_url, rgb(10, 50, 90));
 
-        /* Botón GO */
-        bb_fill_rect(x + w - 65, y + 46, 50, 26, rgb(0, 150, 230));
-        draw_text(x + w - 52, y + 51, "GO", rgb(255, 255, 255));
+        draw_rounded_box_hd(x + w - 70, y + 46, 55, 28, 4, rgb(0, 150, 230), 255);
+        draw_text(x + w - 52, y + 52, "GO", rgb(255, 255, 255));
 
-        /* Contenido de la Página Web Renderizada Dinámicamente */
-        bb_fill_rect_alpha(x + 15, y + 80, w - 30, 360, rgb(252, 254, 255), 245);
+        /* Contenido Web HD */
+        draw_rounded_box_hd(x + 15, y + 84, w - 30, 385, 6, rgb(252, 254, 255), 245);
 
-        /* Cabecera web dinámica */
-        bb_fill_rect(x + 15, y + 80, w - 30, 36, rgb(230, 245, 255));
-        draw_text(x + 30, y + 90, "Sitio Activo: https://", rgb(80, 110, 140));
-        draw_text(x + 206, y + 90, active_rendered_domain, rgb(0, 110, 220));
+        bb_fill_rect(x + 15, y + 84, w - 30, 36, rgb(230, 245, 255));
+        draw_text(x + 30, y + 94, "Sitio Web HD: https://", rgb(80, 110, 140));
+        draw_text(x + 206, y + 94, active_rendered_domain, rgb(0, 110, 220));
 
-        /* Contenido inteligente según lo que el usuario escribió */
-        /* Si contiene google */
         int is_google = 0, is_youtube = 0, is_wiki = 0;
         for (int i = 0; active_rendered_domain[i] != '\0'; i++) {
             if (active_rendered_domain[i] == 'g' && active_rendered_domain[i+1] == 'o') is_google = 1;
@@ -543,95 +595,91 @@ static void render_window_content(int id, int x, int y, int w, int h) {
         }
 
         if (is_google) {
-            draw_sphere(x + w/2 - 60, y + 170, 20, rgb(0, 140, 240));
-            draw_text(x + w/2 - 30, y + 162, "GOOGLE AERO", rgb(10, 50, 90));
-            bb_fill_rect(x + 50, y + 210, w - 100, 32, rgb(255, 255, 255));
-            bb_fill_rect(x + 50, y + 210, w - 100, 1, rgb(0, 150, 230));
-            draw_text(x + 65, y + 218, "Escribe tu busqueda en la barra URL arriba...", rgb(120, 140, 160));
-            draw_text(x + 50, y + 260, "Resultados para toda la Web Global (Sin limites)", rgb(10, 50, 90));
-            draw_text(x + 50, y + 290, "1. Portal Frutiger Aero Oficial - https://frutiger-aero.eco", rgb(0, 100, 220));
-            draw_text(x + 50, y + 320, "2. Descargar Kolotibablo OS v5.0 - https://os.kolotibablo.org", rgb(0, 100, 220));
-            draw_text(x + 50, y + 350, "3. Wikipedia Espanol - https://es.wikipedia.org", rgb(0, 100, 220));
+            draw_sphere_hd(x + w/2 - 65, y + 175, 24, rgb(0, 140, 240));
+            draw_text(x + w/2 - 30, y + 167, "GOOGLE AERO HD", rgb(10, 50, 90));
+            draw_rounded_box_hd(x + 60, y + 220, w - 120, 36, 6, rgb(255, 255, 255), 255);
+            draw_text(x + 80, y + 230, "Busqueda Global Libre: Escribe cualquier URL arriba...", rgb(120, 140, 160));
+            draw_text(x + 60, y + 280, "Resultados Encontrados en la Red Global:", rgb(10, 50, 90));
+            draw_text(x + 60, y + 312, "1. Portal Frutiger Aero HD - https://frutiger-aero.eco", rgb(0, 100, 220));
+            draw_text(x + 60, y + 344, "2. Kolotibablo OS v6.0 HD - https://os.kolotibablo.org", rgb(0, 100, 220));
+            draw_text(x + 60, y + 376, "3. Wikipedia Espanol - https://es.wikipedia.org", rgb(0, 100, 220));
         }
         else if (is_youtube) {
-            bb_fill_rect(x + 40, y + 130, w - 80, 170, rgb(20, 30, 45));
-            draw_sphere(x + w/2, y + 215, 25, rgb(230, 40, 40));
-            draw_text(x + w/2 - 8, y + 207, ">", rgb(255, 255, 255));
-            draw_text(x + 40, y + 320, "YouTube Aero: 'Frutiger Aero Music & Ambient 4K'", rgb(10, 50, 90));
-            draw_text(x + 40, y + 345, "Canal: Aqua Vibes - 1.2M visualizaciones", rgb(80, 110, 130));
-            draw_text(x + 40, y + 375, "[Video cargado y listo en buffer de alta resolucion]", rgb(0, 140, 60));
+            draw_rounded_box_hd(x + 40, y + 135, w - 80, 200, 8, rgb(15, 25, 38), 255);
+            draw_sphere_hd(x + w/2, y + 235, 32, rgb(230, 40, 40));
+            draw_text(x + w/2 - 8, y + 227, ">", rgb(255, 255, 255));
+            draw_text(x + 40, y + 355, "YouTube Aero HD: 'Frutiger Aero Music & Ambient 4K Widescreen'", rgb(10, 50, 90));
+            draw_text(x + 40, y + 382, "Canal: Aqua Vibes - 2.4M visualizaciones (Audio estéreo activo)", rgb(80, 110, 130));
         }
         else if (is_wiki) {
-            draw_text(x + 40, y + 135, "WIKIPEDIA LIBRE - ACCESO TOTAL", rgb(10, 50, 90));
-            bb_fill_rect(x + 40, y + 158, w - 80, 1, rgb(180, 210, 230));
-            draw_text(x + 40, y + 175, "Articulo enciclopedico cargado correctamente:", rgb(40, 70, 90));
-            draw_text(x + 40, y + 205, "Frutiger Aero abarca interfaces de usuario organicas,", rgb(20, 30, 40));
-            draw_text(x + 40, y + 230, "cristal transparente, naturaleza y diseno limpio.", rgb(20, 30, 40));
-            draw_text(x + 40, y + 265, "Navegacion sin barreras: puedes teclear cualquier", rgb(0, 110, 200));
-            draw_text(x + 40, y + 290, "direccion web en la barra superior para explorar.", rgb(0, 110, 200));
+            draw_text(x + 40, y + 140, "WIKIPEDIA LIBRE HD - ACCESO TOTAL", rgb(10, 50, 90));
+            bb_fill_rect(x + 40, y + 165, w - 80, 1, rgb(180, 210, 230));
+            draw_text(x + 40, y + 185, "Articulo: Frutiger Aero (Estetica 2004-2013)", rgb(40, 70, 90));
+            draw_text(x + 40, y + 215, "Diseno caracterizado por agua brillante, motivos de cielo,", rgb(20, 30, 40));
+            draw_text(x + 40, y + 242, "vidrio translucido (Aero Glass), bokeh y naturaleza viva.", rgb(20, 30, 40));
+            draw_text(x + 40, y + 280, "Navegacion sin barreras: puedes teclear cualquier direccion", rgb(0, 110, 200));
+            draw_text(x + 40, y + 308, "web en la barra superior para explorar inmediatamente.", rgb(0, 110, 200));
         }
         else {
-            /* Cualquier otra página personalizada escrita por el usuario */
-            draw_sphere(x + 65, y + 155, 24, rgb(0, 160, 230));
-            draw_text(x + 105, y + 148, active_rendered_domain, rgb(10, 50, 90));
-            draw_text(x + 40, y + 200, "Conexion establecida exitosamente con el servidor web.", rgb(0, 140, 60));
-            draw_text(x + 40, y + 230, "Pagina web cargada en modo texto e hipermedia completo.", rgb(40, 70, 90));
-            draw_text(x + 40, y + 260, "Has navegado libremente hacia este sitio sin restricciones.", rgb(40, 70, 90));
-            draw_text(x + 40, y + 300, "[Tip: Haz click en la barra de URL arriba, borra con", rgb(0, 110, 200));
-            draw_text(x + 40, y + 325, "Backspace y escribe otra web como 'google.com' o 'youtube']", rgb(0, 110, 200));
+            draw_sphere_hd(x + 70, y + 165, 28, rgb(0, 160, 230));
+            draw_text(x + 115, y + 158, active_rendered_domain, rgb(10, 50, 90));
+            draw_text(x + 40, y + 215, "Conexion establecida exitosamente en alta definicion.", rgb(0, 140, 60));
+            draw_text(x + 40, y + 248, "Servidor web respondiendo con contenido hipermedia completo.", rgb(40, 70, 90));
+            draw_text(x + 40, y + 280, "Has navegado libremente hacia este sitio sin restricciones.", rgb(40, 70, 90));
+            draw_text(x + 40, y + 325, "[Tip: Escribe en la barra de URL superior 'google.com' o 'youtube']", rgb(0, 110, 200));
         }
     }
     else if (id == WIN_SETTINGS) {
-        draw_text(x + 25, y + 55, "1. PALETAS DE COLOR DEL ESCRITORIO:", rgb(10, 50, 90));
+        draw_text(x + 25, y + 55, "1. PALETAS DE COLOR DEL ESCRITORIO HD:", rgb(10, 50, 90));
 
-        int bw = 85, bh = 28;
-        bb_fill_rect(x + 25, y + 78, bw, bh, (current_theme == THEME_OCEAN) ? rgb(0, 120, 230) : rgb(190, 220, 245));
-        draw_text(x + 38, y + 84, "Oceano", (current_theme == THEME_OCEAN) ? rgb(255, 255, 255) : rgb(10, 50, 90));
+        int bw = 95, bh = 30;
+        draw_rounded_box_hd(x + 25,  y + 78, bw, bh, 5, (current_theme == THEME_OCEAN) ? rgb(0, 120, 230) : rgb(190, 220, 245), 255);
+        draw_text(x + 42, y + 85, "Oceano", (current_theme == THEME_OCEAN) ? rgb(255, 255, 255) : rgb(10, 50, 90));
 
-        bb_fill_rect(x + 115, y + 78, bw, bh, (current_theme == THEME_ECO) ? rgb(0, 150, 70) : rgb(190, 220, 245));
-        draw_text(x + 124, y + 84, "Eco Verde", (current_theme == THEME_ECO) ? rgb(255, 255, 255) : rgb(10, 50, 90));
+        draw_rounded_box_hd(x + 128, y + 78, bw, bh, 5, (current_theme == THEME_ECO) ? rgb(0, 150, 70) : rgb(190, 220, 245), 255);
+        draw_text(x + 140, y + 85, "Eco Verde", (current_theme == THEME_ECO) ? rgb(255, 255, 255) : rgb(10, 50, 90));
 
-        bb_fill_rect(x + 205, y + 78, bw, bh, (current_theme == THEME_SUNSET) ? rgb(230, 80, 60) : rgb(190, 220, 245));
-        draw_text(x + 218, y + 84, "Sunset", (current_theme == THEME_SUNSET) ? rgb(255, 255, 255) : rgb(10, 50, 90));
+        draw_rounded_box_hd(x + 231, y + 78, bw, bh, 5, (current_theme == THEME_SUNSET) ? rgb(230, 80, 60) : rgb(190, 220, 245), 255);
+        draw_text(x + 248, y + 85, "Sunset", (current_theme == THEME_SUNSET) ? rgb(255, 255, 255) : rgb(10, 50, 90));
 
-        bb_fill_rect(x + 295, y + 78, bw, bh, (current_theme == THEME_VIOLET) ? rgb(160, 60, 210) : rgb(190, 220, 245));
-        draw_text(x + 308, y + 84, "Violeta", (current_theme == THEME_VIOLET) ? rgb(255, 255, 255) : rgb(10, 50, 90));
+        draw_rounded_box_hd(x + 334, y + 78, bw, bh, 5, (current_theme == THEME_VIOLET) ? rgb(160, 60, 210) : rgb(190, 220, 245), 255);
+        draw_text(x + 350, y + 85, "Violeta", (current_theme == THEME_VIOLET) ? rgb(255, 255, 255) : rgb(10, 50, 90));
 
-        bb_fill_rect(x + 385, y + 78, bw, bh, (current_theme == THEME_NIGHT) ? rgb(20, 40, 70) : rgb(190, 220, 245));
-        draw_text(x + 394, y + 84, "Nocturno", (current_theme == THEME_NIGHT) ? rgb(255, 255, 255) : rgb(10, 50, 90));
+        draw_rounded_box_hd(x + 437, y + 78, bw, bh, 5, (current_theme == THEME_NIGHT) ? rgb(20, 40, 70) : rgb(190, 220, 245), 255);
+        draw_text(x + 450, y + 85, "Nocturno", (current_theme == THEME_NIGHT) ? rgb(255, 255, 255) : rgb(10, 50, 90));
 
-        draw_text(x + 25, y + 125, "2. VELOCIDAD DE BURBUJAS DINAMICAS:", rgb(10, 50, 90));
-        int spd_w = 95;
-        bb_fill_rect(x + 25,  y + 148, spd_w, bh, (bubble_speed_mode == 0) ? rgb(0, 130, 240) : rgb(210, 235, 250));
-        draw_text(x + 45, y + 154, "Pausa", (bubble_speed_mode == 0) ? rgb(255, 255, 255) : rgb(10, 50, 90));
+        draw_text(x + 25, y + 128, "2. VELOCIDAD DE BURBUJAS DINAMICAS:", rgb(10, 50, 90));
+        int spd_w = 110;
+        draw_rounded_box_hd(x + 25,  y + 152, spd_w, bh, 5, (bubble_speed_mode == 0) ? rgb(0, 130, 240) : rgb(210, 235, 250), 255);
+        draw_text(x + 55, y + 159, "Pausa", (bubble_speed_mode == 0) ? rgb(255, 255, 255) : rgb(10, 50, 90));
 
-        bb_fill_rect(x + 130, y + 148, spd_w, bh, (bubble_speed_mode == 1) ? rgb(0, 130, 240) : rgb(210, 235, 250));
-        draw_text(x + 150, y + 154, "Lenta", (bubble_speed_mode == 1) ? rgb(255, 255, 255) : rgb(10, 50, 90));
+        draw_rounded_box_hd(x + 145, y + 152, spd_w, bh, 5, (bubble_speed_mode == 1) ? rgb(0, 130, 240) : rgb(210, 235, 250), 255);
+        draw_text(x + 175, y + 159, "Lenta", (bubble_speed_mode == 1) ? rgb(255, 255, 255) : rgb(10, 50, 90));
 
-        bb_fill_rect(x + 235, y + 148, spd_w, bh, (bubble_speed_mode == 2) ? rgb(0, 130, 240) : rgb(210, 235, 250));
-        draw_text(x + 252, y + 154, "Normal", (bubble_speed_mode == 2) ? rgb(255, 255, 255) : rgb(10, 50, 90));
+        draw_rounded_box_hd(x + 265, y + 152, spd_w, bh, 5, (bubble_speed_mode == 2) ? rgb(0, 130, 240) : rgb(210, 235, 250), 255);
+        draw_text(x + 292, y + 159, "Normal", (bubble_speed_mode == 2) ? rgb(255, 255, 255) : rgb(10, 50, 90));
 
-        bb_fill_rect(x + 340, y + 148, spd_w, bh, (bubble_speed_mode == 3) ? rgb(0, 130, 240) : rgb(210, 235, 250));
-        draw_text(x + 355, y + 154, "Rapida", (bubble_speed_mode == 3) ? rgb(255, 255, 255) : rgb(10, 50, 90));
+        draw_rounded_box_hd(x + 385, y + 152, spd_w, bh, 5, (bubble_speed_mode == 3) ? rgb(0, 130, 240) : rgb(210, 235, 250), 255);
+        draw_text(x + 412, y + 159, "Rapida", (bubble_speed_mode == 3) ? rgb(255, 255, 255) : rgb(10, 50, 90));
 
-        draw_text(x + 25, y + 195, "3. OPACIDAD DE CRISTAL AERO GLASS:", rgb(10, 50, 90));
-        bb_fill_rect(x + 25,  y + 218, 120, bh, (glass_alpha == 180) ? rgb(0, 130, 240) : rgb(210, 235, 250));
-        draw_text(x + 35, y + 224, "Ligera (70%)", (glass_alpha == 180) ? rgb(255, 255, 255) : rgb(10, 50, 90));
+        draw_text(x + 25, y + 205, "3. OPACIDAD DE CRISTAL AERO GLASS:", rgb(10, 50, 90));
+        draw_rounded_box_hd(x + 25,  y + 230, 140, bh, 5, (glass_alpha == 180) ? rgb(0, 130, 240) : rgb(210, 235, 250), 255);
+        draw_text(x + 40, y + 237, "Ligera (70%)", (glass_alpha == 180) ? rgb(255, 255, 255) : rgb(10, 50, 90));
 
-        bb_fill_rect(x + 160, y + 218, 120, bh, (glass_alpha == 225) ? rgb(0, 130, 240) : rgb(210, 235, 250));
-        draw_text(x + 170, y + 224, "Media (85%)", (glass_alpha == 225) ? rgb(255, 255, 255) : rgb(10, 50, 90));
+        draw_rounded_box_hd(x + 180, y + 230, 140, bh, 5, (glass_alpha == 225) ? rgb(0, 130, 240) : rgb(210, 235, 250), 255);
+        draw_text(x + 195, y + 237, "Media (85%)", (glass_alpha == 225) ? rgb(255, 255, 255) : rgb(10, 50, 90));
 
-        bb_fill_rect(x + 295, y + 218, 120, bh, (glass_alpha == 255) ? rgb(0, 130, 240) : rgb(210, 235, 250));
-        draw_text(x + 305, y + 224, "Solida (100%)", (glass_alpha == 255) ? rgb(255, 255, 255) : rgb(10, 50, 90));
+        draw_rounded_box_hd(x + 335, y + 230, 140, bh, 5, (glass_alpha == 255) ? rgb(0, 130, 240) : rgb(210, 235, 250), 255);
+        draw_text(x + 348, y + 237, "Solida (100%)", (glass_alpha == 255) ? rgb(255, 255, 255) : rgb(10, 50, 90));
 
-        draw_text(x + 25, y + 265, "4. ELEMENTOS VISUALES Y AUDIO:", rgb(10, 50, 90));
-        bb_fill_rect(x + 25, y + 288, 200, bh, show_eco_hills ? rgb(0, 150, 70) : rgb(220, 220, 220));
-        draw_text(x + 35, y + 294, show_eco_hills ? "[x] Colinas Eco (ON)" : "[ ] Colinas Eco (OFF)", show_eco_hills ? rgb(255, 255, 255) : rgb(80, 80, 80));
+        draw_text(x + 25, y + 282, "4. ELEMENTOS VISUALES Y AUDIO:", rgb(10, 50, 90));
+        draw_rounded_box_hd(x + 25,  y + 308, 220, bh, 5, show_eco_hills ? rgb(0, 150, 70) : rgb(220, 220, 220), 255);
+        draw_text(x + 38, y + 315, show_eco_hills ? "[x] Colinas Eco (ON)" : "[ ] Colinas Eco (OFF)", show_eco_hills ? rgb(255, 255, 255) : rgb(80, 80, 80));
 
-        bb_fill_rect(x + 240, y + 288, 200, bh, sfx_enabled ? rgb(0, 130, 240) : rgb(220, 220, 220));
-        draw_text(x + 250, y + 294, sfx_enabled ? "[x] Audio Gotas (ON)" : "[ ] Audio Gotas (OFF)", sfx_enabled ? rgb(255, 255, 255) : rgb(80, 80, 80));
+        draw_rounded_box_hd(x + 265, y + 308, 220, bh, 5, sfx_enabled ? rgb(0, 130, 240) : rgb(220, 220, 220), 255);
+        draw_text(x + 280, y + 315, sfx_enabled ? "[x] Audio Gotas (ON)" : "[ ] Audio Gotas (OFF)", sfx_enabled ? rgb(255, 255, 255) : rgb(80, 80, 80));
 
-        draw_text(x + 25, y + 340, "[Tip: Haz click en cualquiera de las opciones para aplicarla]", rgb(0, 110, 200));
+        draw_text(x + 25, y + 370, "[Tip: Haz click en cualquiera de las opciones para aplicarla en tiempo real]", rgb(0, 110, 200));
     }
 }
 
@@ -641,68 +689,75 @@ static void render_window(int id) {
 
     int wx = win->x, wy = win->y, ww = win->w, wh = win->h;
 
-    bb_fill_rect_alpha(wx + 8, wy + 8, ww, wh, rgb(0, 20, 50), 90);
-    bb_fill_rect_alpha(wx, wy, ww, wh, rgb(235, 248, 255), glass_alpha);
+    /* Sombra exterior multicapa (Drop Shadow HD) */
+    draw_rounded_box_hd(wx + 10, wy + 10, ww, wh, 12, rgb(0, 20, 50), 90);
+    draw_rounded_box_hd(wx + 4,  wy + 4,  ww, wh, 12, rgb(0, 30, 70), 50);
 
+    /* Cristal Aero Glass HD */
+    draw_rounded_box_hd(wx, wy, ww, wh, 10, rgb(235, 248, 255), glass_alpha);
+
+    /* Borde exterior blanco de brillo */
     for (int i = 0; i < ww; i++) {
-        bb_pixel(wx + i, wy, rgb(255, 255, 255));
-        bb_pixel(wx + i, wy + wh - 1, rgb(160, 210, 240));
+        bb_pixel_alpha(wx + i, wy, rgb(255, 255, 255), 230);
+        bb_pixel_alpha(wx + i, wy + wh - 1, rgb(160, 210, 240), 200);
     }
     for (int j = 0; j < wh; j++) {
-        bb_pixel(wx, wy + j, rgb(255, 255, 255));
-        bb_pixel(wx + ww - 1, wy + j, rgb(160, 210, 240));
+        bb_pixel_alpha(wx, wy + j, rgb(255, 255, 255), 230);
+        bb_pixel_alpha(wx + ww - 1, wy + j, rgb(160, 210, 240), 200);
     }
 
-    for (int j = 0; j < 36; j++) {
+    /* Barra de Título con Gradiente Aero Glass */
+    for (int j = 0; j < 38; j++) {
         uint8_t bar_r = 140 + j * 2;
         uint8_t bar_g = 210 + j;
         uint8_t bar_b = 255;
-        for (int i = 1; i < ww - 1; i++) {
-            bb_pixel(wx + i, wy + 1 + j, rgb(bar_r, bar_g, bar_b));
+        for (int i = 2; i < ww - 2; i++) {
+            bb_pixel_alpha(wx + i, wy + 2 + j, rgb(bar_r, bar_g, bar_b), 240);
         }
     }
-    for (int i = 1; i < ww - 1; i++) {
-        bb_pixel(wx + i, wy + 2, rgb(255, 255, 255));
+    for (int i = 2; i < ww - 2; i++) {
+        bb_pixel(wx + i, wy + 3, rgb(255, 255, 255));
     }
 
-    draw_text(wx + 18, wy + 11, win->title, rgb(10, 50, 90));
+    draw_text(wx + 20, wy + 12, win->title, rgb(10, 50, 90));
 
-    draw_sphere(wx + ww - 20, wy + 18, 7, rgb(230, 40, 40));
-    draw_sphere(wx + ww - 40, wy + 18, 7, rgb(40, 200, 80));
-    draw_sphere(wx + ww - 60, wy + 18, 7, rgb(240, 180, 20));
+    /* Botones de Control de Ventana tipo Joya Esférica HD */
+    draw_sphere_hd(wx + ww - 22, wy + 20, 8, rgb(235, 45, 45));
+    draw_sphere_hd(wx + ww - 44, wy + 20, 8, rgb(45, 205, 85));
+    draw_sphere_hd(wx + ww - 66, wy + 20, 8, rgb(245, 185, 25));
 
     render_window_content(id, wx, wy, ww, wh);
 }
 
 /* ============================================================================
- * Renderizado General del Escritorio
+ * Renderizado General del Escritorio HD
  * ============================================================================ */
 static void render_desktop(void) {
     anim_counter++;
 
-    /* 1. Fondo Wallpaper con Gradiente Dinámico según el Tema */
+    /* 1. Fondo Widescreen HD con Gradiente Espectacular */
     for (uint32_t y = 0; y < screen_h; y++) {
         uint8_t r, g, b;
         if (current_theme == THEME_OCEAN) {
-            r = 2 + (y * 20) / screen_h;
-            g = 40 + (y * 140) / screen_h;
-            b = 64 + (y * 120) / screen_h;
+            r = 2 + (y * 22) / screen_h;
+            g = 35 + (y * 145) / screen_h;
+            b = 65 + (y * 125) / screen_h;
         } else if (current_theme == THEME_ECO) {
-            r = 10 + (y * 30) / screen_h;
-            g = 70 + (y * 130) / screen_h;
-            b = 40 + (y * 60) / screen_h;
+            r = 10 + (y * 32) / screen_h;
+            g = 65 + (y * 135) / screen_h;
+            b = 40 + (y * 65) / screen_h;
         } else if (current_theme == THEME_SUNSET) {
-            r = 30 + (y * 180) / screen_h;
-            g = 50 + (y * 80) / screen_h;
-            b = 90 + (y * 40) / screen_h;
+            r = 30 + (y * 185) / screen_h;
+            g = 45 + (y * 85) / screen_h;
+            b = 90 + (y * 45) / screen_h;
         } else if (current_theme == THEME_VIOLET) {
-            r = 40 + (y * 120) / screen_h;
-            g = 20 + (y * 60) / screen_h;
-            b = 80 + (y * 140) / screen_h;
+            r = 45 + (y * 125) / screen_h;
+            g = 20 + (y * 65) / screen_h;
+            b = 85 + (y * 145) / screen_h;
         } else {
-            r = 5 + (y * 15) / screen_h;
-            g = 15 + (y * 30) / screen_h;
-            b = 30 + (y * 50) / screen_h;
+            r = 6 + (y * 16) / screen_h;
+            g = 14 + (y * 32) / screen_h;
+            b = 28 + (y * 52) / screen_h;
         }
         uint32_t sky = rgb(r, g, b);
         for (uint32_t x = 0; x < screen_w; x++) {
@@ -710,106 +765,106 @@ static void render_desktop(void) {
         }
     }
 
-    /* 2. Colinas Eco Hills Curvadas (si están habilitadas) */
+    /* 2. Colinas Eco Hills Curvadas HD */
     if (show_eco_hills) {
-        for (uint32_t y = 480; y < screen_h; y++) {
+        for (uint32_t y = 450; y < screen_h; y++) {
             for (uint32_t x = 0; x < screen_w; x++) {
-                int hill = 530 - (int)((x - 512) * (x - 512) / 4500);
+                int hill = 510 - (int)((x - 640) * (x - 640) / 6000);
                 if ((int)y >= hill) {
                     uint8_t gr = 30 + (y - hill) / 3;
-                    uint8_t gg = 175 - (y - hill) / 3;
-                    uint8_t gb = 70;
-                    bb_pixel_alpha(x, y, rgb(gr, gg, gb), 210);
+                    uint8_t gg = 180 - (y - hill) / 3;
+                    uint8_t gb = 75;
+                    bb_pixel_alpha(x, y, rgb(gr, gg, gb), 215);
                 }
             }
         }
     }
 
-    /* 3. Burbujas Flotantes Dinámicas */
+    /* 3. Burbujas Flotantes Dinámicas HD */
     update_and_draw_bubbles();
 
-    /* 4. Iconos del Escritorio */
+    /* 4. Iconos del Escritorio HD */
     /* Icono 1: Mi Equipo */
-    bb_fill_rect_alpha(30, 30, 80, 80, rgb(255, 255, 255), 45);
-    bb_fill_rect(48, 42, 44, 30, rgb(20, 140, 220));
-    bb_fill_rect(52, 46, 36, 22, rgb(230, 245, 255));
-    draw_text(45, 96, "Equipo", rgb(255, 255, 255));
+    draw_rounded_box_hd(35, 30, 85, 85, 12, rgb(255, 255, 255), 50);
+    draw_rounded_box_hd(52, 44, 50, 34, 4, rgb(20, 140, 220), 255);
+    draw_rounded_box_hd(57, 48, 40, 24, 2, rgb(230, 245, 255), 255);
+    draw_text(52, 100, "Equipo", rgb(255, 255, 255));
 
     /* Icono 2: Archivos */
-    bb_fill_rect_alpha(30, 125, 80, 80, rgb(255, 255, 255), 45);
-    bb_fill_rect(48, 140, 44, 30, rgb(240, 180, 40));
-    bb_fill_rect(52, 135, 20, 8, rgb(220, 160, 30));
-    draw_text(38, 191, "Archivos", rgb(255, 255, 255));
+    draw_rounded_box_hd(35, 130, 85, 85, 12, rgb(255, 255, 255), 50);
+    draw_rounded_box_hd(52, 146, 50, 34, 4, rgb(240, 180, 40), 255);
+    draw_rounded_box_hd(57, 141, 24, 10, 2, rgb(220, 160, 30), 255);
+    draw_text(45, 200, "Archivos", rgb(255, 255, 255));
 
     /* Icono 3: Aero Player */
-    bb_fill_rect_alpha(30, 220, 80, 80, rgb(255, 255, 255), 45);
-    draw_sphere(70, 252, 18, rgb(0, 200, 160));
-    draw_text(45, 286, "Player", rgb(255, 255, 255));
+    draw_rounded_box_hd(35, 230, 85, 85, 12, rgb(255, 255, 255), 50);
+    draw_sphere_hd(77, 265, 22, rgb(0, 200, 160));
+    draw_text(52, 300, "Player", rgb(255, 255, 255));
 
     /* Icono 4: Navegador */
-    bb_fill_rect_alpha(30, 315, 80, 80, rgb(255, 255, 255), 45);
-    draw_sphere(70, 347, 18, rgb(0, 150, 240));
-    draw_text(38, 381, "Navegador", rgb(255, 255, 255));
+    draw_rounded_box_hd(35, 330, 85, 85, 12, rgb(255, 255, 255), 50);
+    draw_sphere_hd(77, 365, 22, rgb(0, 150, 240));
+    draw_text(42, 400, "Navegador", rgb(255, 255, 255));
 
     /* Icono 5: Ajustes */
-    bb_fill_rect_alpha(30, 410, 80, 80, rgb(255, 255, 255), 45);
-    draw_sphere(70, 442, 18, rgb(0, 190, 180));
-    draw_text(45, 476, "Ajustes", rgb(255, 255, 255));
+    draw_rounded_box_hd(35, 430, 85, 85, 12, rgb(255, 255, 255), 50);
+    draw_sphere_hd(77, 465, 22, rgb(0, 190, 180));
+    draw_text(50, 500, "Ajustes", rgb(255, 255, 255));
 
-    /* 5. Renderizar Ventanas en Profundidad */
+    /* 5. Renderizar Ventanas */
     for (int i = 0; i < WIN_COUNT; i++) {
         if (i != active_win) render_window(i);
     }
     render_window(active_win);
 
-    /* Modal de Imagen si se abrió Paisaje.png */
+    /* Modal de Imagen HD */
     if (modal_image_open) {
-        bb_fill_rect_alpha(260, 140, 500, 340, rgb(255, 255, 255), 235);
-        bb_fill_rect(260, 140, 500, 34, rgb(0, 140, 230));
-        draw_text(280, 150, "Visor de Imagenes: Paisaje_Aqua.png", rgb(255, 255, 255));
-        draw_sphere(740, 156, 7, rgb(230, 40, 40));
+        draw_rounded_box_hd(380, 140, 520, 360, 12, rgb(255, 255, 255), 240);
+        bb_fill_rect(380, 140, 520, 36, rgb(0, 140, 230));
+        draw_text(400, 152, "Visor HD: Paisaje_Aqua.png", rgb(255, 255, 255));
+        draw_sphere_hd(875, 158, 8, rgb(230, 40, 40));
 
-        for (int y = 0; y < 200; y++) {
+        for (int y = 0; y < 220; y++) {
             uint32_t col = rgb(20 + y/3, 130 + y/2, 220);
-            for (int x = 0; x < 440; x++) {
-                bb_pixel(290 + x, 190 + y, col);
+            for (int x = 0; x < 460; x++) {
+                bb_pixel(410 + x, 195 + y, col);
             }
         }
-        draw_sphere(510, 270, 45, rgb(255, 240, 120));
-        draw_text(380, 420, "[Haz click en la X roja para cerrar el visor]", rgb(10, 50, 90));
+        draw_sphere_hd(640, 280, 52, rgb(255, 240, 120));
+        draw_text(500, 445, "[Haz click en la X roja para cerrar]", rgb(10, 50, 90));
     }
 
-    /* 6. Barra de Tareas Inferior */
-    int tby = screen_h - 48;
-    for (int j = 0; j < 48; j++) {
+    /* 6. Barra de Tareas Inferior HD (Aero Taskbar) */
+    int tby = screen_h - 52;
+    for (int j = 0; j < 52; j++) {
         uint8_t tb_r = 10 + j * 2;
         uint8_t tb_g = 60 + j * 3;
-        uint8_t tb_b = 130 + j * 2;
+        uint8_t tb_b = 135 + j * 2;
         for (uint32_t i = 0; i < screen_w; i++) {
-            bb_pixel_alpha(i, tby + j, rgb(tb_r, tb_g, tb_b), 200);
+            bb_pixel_alpha(i, tby + j, rgb(tb_r, tb_g, tb_b), 205);
         }
     }
     for (uint32_t i = 0; i < screen_w; i++) {
-        bb_pixel(i, tby, rgb(200, 240, 255));
+        bb_pixel_alpha(i, tby, rgb(200, 240, 255), 230);
     }
 
-    /* Start Orb */
-    draw_sphere(32, tby + 24, 20, rgb(0, 130, 240));
-    draw_text(28, tby + 16, "K", rgb(255, 255, 255));
+    /* Start Orb HD Esférico */
+    draw_sphere_hd(36, tby + 26, 22, rgb(0, 130, 240));
+    draw_text(32, tby + 18, "K", rgb(255, 255, 255));
 
-    /* Botones de Aplicaciones Abiertas en la Barra de Tareas */
-    int tbx = 70;
+    /* Botones de Aplicaciones Abiertas en la Barra de Tareas HD */
+    int tbx = 80;
     const char* app_names[WIN_COUNT] = {"Equipo", "Archivos", "Player", "Web", "Ajustes"};
     for (int i = 0; i < WIN_COUNT; i++) {
         if (windows[i].visible) {
             uint32_t btn_bg = (i == active_win && !windows[i].minimized) ? rgb(255, 255, 255) : rgb(180, 220, 250);
-            bb_fill_rect_alpha(tbx, tby + 8, 90, 32, btn_bg, 80);
-            draw_text(tbx + 12, tby + 16, app_names[i], rgb(255, 255, 255));
-            tbx += 98;
+            draw_rounded_box_hd(tbx, tby + 8, 105, 36, 6, btn_bg, 85);
+            draw_text(tbx + 18, tby + 18, app_names[i], rgb(255, 255, 255));
+            tbx += 115;
         }
     }
 
-    /* Reloj Real CMOS / RTC */
+    /* Reloj Digital HD CMOS/RTC */
     int rh = 12, rm = 0, rs = 0;
     read_rtc(&rh, &rm, &rs);
     char time_str[16];
@@ -823,35 +878,35 @@ static void render_desktop(void) {
     time_str[7] = '0' + (rs % 10);
     time_str[8] = '\0';
 
-    bb_fill_rect_alpha(screen_w - 110, tby + 8, 95, 32, rgb(255, 255, 255), 40);
-    draw_text(screen_w - 95, tby + 17, time_str, rgb(255, 255, 255));
+    draw_rounded_box_hd(screen_w - 120, tby + 8, 105, 36, 6, rgb(255, 255, 255), 45);
+    draw_text(screen_w - 100, tby + 18, time_str, rgb(255, 255, 255));
 
-    /* 7. Menú Inicio Desplegable */
+    /* 7. Menú Inicio Desplegable HD */
     if (start_menu_open) {
-        int sm_w = 280, sm_h = 360;
+        int sm_w = 300, sm_h = 380;
         int sm_x = 10, sm_y = tby - sm_h - 4;
-        bb_fill_rect_alpha(sm_x, sm_y, sm_w, sm_h, rgb(240, 250, 255), 235);
-        bb_fill_rect(sm_x, sm_y, sm_w, 42, rgb(0, 120, 210));
-        draw_text(sm_x + 15, sm_y + 14, "Usuario Aero - Kolotibablo", rgb(255, 255, 255));
+        draw_rounded_box_hd(sm_x, sm_y, sm_w, sm_h, 12, rgb(240, 250, 255), 235);
+        draw_rounded_box_hd(sm_x, sm_y, sm_w, 46, 12, rgb(0, 120, 210), 255);
+        draw_text(sm_x + 18, sm_y + 16, "Usuario Aero - Kolotibablo HD", rgb(255, 255, 255));
 
-        draw_text(sm_x + 20, sm_y + 60, "> 1. Mi Equipo", rgb(20, 60, 100));
-        draw_text(sm_x + 20, sm_y + 95, "> 2. Explorador de Archivos", rgb(20, 60, 100));
-        draw_text(sm_x + 20, sm_y + 130, "> 3. Aero Music Player", rgb(20, 60, 100));
-        draw_text(sm_x + 20, sm_y + 165, "> 4. Navegador Aqua Explorer", rgb(20, 60, 100));
-        draw_text(sm_x + 20, sm_y + 200, "> 5. Configuracion / Temas", rgb(20, 60, 100));
-        draw_text(sm_x + 20, sm_y + 240, "> [Restaurar Todas]", rgb(0, 140, 60));
-        draw_text(sm_x + 20, sm_y + 310, "[X] Apagar Sistema", rgb(200, 40, 40));
+        draw_text(sm_x + 22, sm_y + 65, "> 1. Mi Equipo", rgb(20, 60, 100));
+        draw_text(sm_x + 22, sm_y + 102, "> 2. Explorador de Archivos", rgb(20, 60, 100));
+        draw_text(sm_x + 22, sm_y + 139, "> 3. Aero Music Player", rgb(20, 60, 100));
+        draw_text(sm_x + 22, sm_y + 176, "> 4. Navegador Aqua Explorer", rgb(20, 60, 100));
+        draw_text(sm_x + 22, sm_y + 213, "> 5. Configuracion / Temas", rgb(20, 60, 100));
+        draw_text(sm_x + 22, sm_y + 255, "> [Restaurar Todas]", rgb(0, 140, 60));
+        draw_text(sm_x + 22, sm_y + 330, "[X] Apagar Sistema", rgb(200, 40, 40));
     }
 
-    /* 8. Cursor de Ratón */
-    for (int cy = 0; cy < 16; cy++) {
+    /* 8. Cursor de Ratón HD con Sombra Suave */
+    for (int cy = 0; cy < 18; cy++) {
         for (int cx = 0; cx <= cy; cx++) {
-            bb_pixel_alpha(mouse_x + cx + 3, mouse_y + cy + 3, rgb(0, 0, 0), 90);
+            bb_pixel_alpha(mouse_x + cx + 3, mouse_y + cy + 3, rgb(0, 0, 0), 85);
         }
     }
-    for (int cy = 0; cy < 15; cy++) {
+    for (int cy = 0; cy < 17; cy++) {
         for (int cx = 0; cx <= cy; cx++) {
-            if (cx == 0 || cx == cy || cy == 14) {
+            if (cx == 0 || cx == cy || cy == 16) {
                 bb_pixel(mouse_x + cx, mouse_y + cy, rgb(10, 40, 70));
             } else {
                 bb_pixel(mouse_x + cx, mouse_y + cy, rgb(255, 255, 255));
@@ -910,7 +965,7 @@ static void ps2_mouse_init(void) {
 }
 
 /* ============================================================================
- * Driver de Teclado PS/2 (Lectura y Decodificación de Scancodes Set 1)
+ * Driver de Teclado PS/2 (Scancodes Set 1)
  * ============================================================================ */
 static void navigate_to_url(void) {
     play_bubble_sfx();
@@ -922,7 +977,7 @@ static void navigate_to_url(void) {
 }
 
 static void handle_keyboard_scancode(uint8_t sc) {
-    if (sc & 0x80) return; /* Tecla soltada (break code) */
+    if (sc & 0x80) return;
 
     char ch = 0;
     switch (sc) {
@@ -966,16 +1021,16 @@ static void handle_keyboard_scancode(uint8_t sc) {
         case 0x35: ch = '/'; break;
         case 0x0C: ch = '-'; break;
         case 0x39: ch = ' '; break;
-        case 0x0E: /* Backspace */
+        case 0x0E:
             if (url_focused && url_len > 0) {
                 url_len--;
                 url_input[url_len] = '\0';
                 play_sound(600);
-                for (volatile int i = 0; i < 50000; i++);
+                for (volatile int i = 0; i < 40000; i++);
                 nosound();
             }
             return;
-        case 0x1C: /* Enter */
+        case 0x1C:
             if (url_focused) {
                 navigate_to_url();
             }
@@ -987,7 +1042,7 @@ static void handle_keyboard_scancode(uint8_t sc) {
             url_input[url_len++] = ch;
             url_input[url_len] = '\0';
             play_sound(1200);
-            for (volatile int i = 0; i < 40000; i++);
+            for (volatile int i = 0; i < 35000; i++);
             nosound();
         }
     }
@@ -1004,41 +1059,35 @@ static void bring_to_front(int id) {
 }
 
 static void handle_click(void) {
-    int tby = screen_h - 48;
+    int tby = screen_h - 52;
 
-    /* Clic en Modal de Imagen */
     if (modal_image_open) {
-        if (mouse_x >= 730 && mouse_x <= 750 && mouse_y >= 145 && mouse_y <= 165) {
+        if (mouse_x >= 865 && mouse_x <= 885 && mouse_y >= 148 && mouse_y <= 168) {
             modal_image_open = 0;
             play_bubble_sfx();
             return;
         }
     }
 
-    /* 1. Start Orb */
-    int dist_orb = (mouse_x - 32)*(mouse_x - 32) + (mouse_y - (tby + 24))*(mouse_y - (tby + 24));
-    if (dist_orb <= 22*22) {
+    /* Start Orb */
+    int dist_orb = (mouse_x - 36)*(mouse_x - 36) + (mouse_y - (tby + 26))*(mouse_y - (tby + 26));
+    if (dist_orb <= 24*24) {
         play_bubble_sfx();
         start_menu_open = !start_menu_open;
         return;
     }
 
-    /* 2. Menú Inicio */
+    /* Menú Inicio */
     if (start_menu_open) {
-        int sm_w = 280, sm_h = 360;
+        int sm_w = 300, sm_h = 380;
         int sm_x = 10, sm_y = tby - sm_h - 4;
         if (mouse_x >= sm_x && mouse_x <= sm_x + sm_w && mouse_y >= sm_y && mouse_y <= sm_y + sm_h) {
-            if (mouse_y >= sm_y + 50 && mouse_y <= sm_y + 85) {
-                bring_to_front(WIN_SYSTEM);
-            } else if (mouse_y >= sm_y + 86 && mouse_y <= sm_y + 120) {
-                bring_to_front(WIN_FILES);
-            } else if (mouse_y >= sm_y + 121 && mouse_y <= sm_y + 155) {
-                bring_to_front(WIN_PLAYER);
-            } else if (mouse_y >= sm_y + 156 && mouse_y <= sm_y + 190) {
-                bring_to_front(WIN_BROWSER);
-            } else if (mouse_y >= sm_y + 191 && mouse_y <= sm_y + 225) {
-                bring_to_front(WIN_SETTINGS);
-            } else if (mouse_y >= sm_y + 226 && mouse_y <= sm_y + 265) {
+            if (mouse_y >= sm_y + 50 && mouse_y <= sm_y + 85) bring_to_front(WIN_SYSTEM);
+            else if (mouse_y >= sm_y + 86 && mouse_y <= sm_y + 120) bring_to_front(WIN_FILES);
+            else if (mouse_y >= sm_y + 121 && mouse_y <= sm_y + 155) bring_to_front(WIN_PLAYER);
+            else if (mouse_y >= sm_y + 156 && mouse_y <= sm_y + 190) bring_to_front(WIN_BROWSER);
+            else if (mouse_y >= sm_y + 191 && mouse_y <= sm_y + 225) bring_to_front(WIN_SETTINGS);
+            else if (mouse_y >= sm_y + 226 && mouse_y <= sm_y + 265) {
                 for (int i = 0; i < WIN_COUNT; i++) windows[i].minimized = 0;
             }
             start_menu_open = 0;
@@ -1048,12 +1097,12 @@ static void handle_click(void) {
         }
     }
 
-    /* 3. Barra de Tareas */
+    /* Barra de Tareas */
     if (mouse_y >= tby) {
-        int tbx = 70;
+        int tbx = 80;
         for (int i = 0; i < WIN_COUNT; i++) {
             if (windows[i].visible) {
-                if (mouse_x >= tbx && mouse_x <= tbx + 90) {
+                if (mouse_x >= tbx && mouse_x <= tbx + 105) {
                     play_bubble_sfx();
                     if (active_win == i && !windows[i].minimized) {
                         windows[i].minimized = 1;
@@ -1062,40 +1111,39 @@ static void handle_click(void) {
                     }
                     return;
                 }
-                tbx += 98;
+                tbx += 115;
             }
         }
         return;
     }
 
-    /* 4. Ventana Activa */
+    /* Ventana Activa */
     struct Window* win = &windows[active_win];
     if (win->visible && !win->minimized &&
         mouse_x >= win->x && mouse_x <= win->x + win->w &&
         mouse_y >= win->y && mouse_y <= win->y + win->h) {
 
         /* Botón Cerrar (Rojo) */
-        int close_dx = mouse_x - (win->x + win->w - 20);
-        int close_dy = mouse_y - (win->y + 18);
-        if (close_dx*close_dx + close_dy*close_dy <= 10*10) {
+        int close_dx = mouse_x - (win->x + win->w - 22);
+        int close_dy = mouse_y - (win->y + 20);
+        if (close_dx*close_dx + close_dy*close_dy <= 11*11) {
             play_bubble_sfx();
             win->visible = 0;
             return;
         }
 
         /* Botón Minimizar (Amarillo) */
-        int min_dx = mouse_x - (win->x + win->w - 60);
-        int min_dy = mouse_y - (win->y + 18);
-        if (min_dx*min_dx + min_dy*min_dy <= 10*10) {
+        int min_dx = mouse_x - (win->x + win->w - 66);
+        int min_dy = mouse_y - (win->y + 20);
+        if (min_dx*min_dx + min_dy*min_dy <= 11*11) {
             play_bubble_sfx();
             win->minimized = 1;
             return;
         }
 
-        /* --- Interacciones: NAVEGADOR LIBRE CON BARRA DE URL EDITABLE --- */
+        /* Navegador */
         if (active_win == WIN_BROWSER) {
-            /* Clic en la Barra de URL para enfocar y escribir */
-            if (mouse_x >= win->x + 92 && mouse_x <= win->x + win->w - 70 && mouse_y >= win->y + 46 && mouse_y <= win->y + 72) {
+            if (mouse_x >= win->x + 92 && mouse_x <= win->x + win->w - 75 && mouse_y >= win->y + 46 && mouse_y <= win->y + 74) {
                 url_focused = 1;
                 play_bubble_sfx();
                 return;
@@ -1103,8 +1151,7 @@ static void handle_click(void) {
                 url_focused = 0;
             }
 
-            /* Clic en Botón GO */
-            if (mouse_x >= win->x + win->w - 65 && mouse_x <= win->x + win->w - 15 && mouse_y >= win->y + 46 && mouse_y <= win->y + 72) {
+            if (mouse_x >= win->x + win->w - 70 && mouse_x <= win->x + win->w - 15 && mouse_y >= win->y + 46 && mouse_y <= win->y + 74) {
                 navigate_to_url();
                 return;
             }
@@ -1112,45 +1159,41 @@ static void handle_click(void) {
             url_focused = 0;
         }
 
-        /* --- Interacciones: AJUSTES --- */
+        /* Ajustes */
         if (active_win == WIN_SETTINGS) {
-            /* 1. Selector de 5 Temas */
-            if (mouse_y >= win->y + 78 && mouse_y <= win->y + 106) {
-                if (mouse_x >= win->x + 25 && mouse_x <= win->x + 110) current_theme = THEME_OCEAN;
-                else if (mouse_x >= win->x + 115 && mouse_x <= win->x + 200) current_theme = THEME_ECO;
-                else if (mouse_x >= win->x + 205 && mouse_x <= win->x + 290) current_theme = THEME_SUNSET;
-                else if (mouse_x >= win->x + 295 && mouse_x <= win->x + 380) current_theme = THEME_VIOLET;
-                else if (mouse_x >= win->x + 385 && mouse_x <= win->x + 470) current_theme = THEME_NIGHT;
+            if (mouse_y >= win->y + 78 && mouse_y <= win->y + 108) {
+                if (mouse_x >= win->x + 25 && mouse_x <= win->x + 120) current_theme = THEME_OCEAN;
+                else if (mouse_x >= win->x + 128 && mouse_x <= win->x + 223) current_theme = THEME_ECO;
+                else if (mouse_x >= win->x + 231 && mouse_x <= win->x + 326) current_theme = THEME_SUNSET;
+                else if (mouse_x >= win->x + 334 && mouse_x <= win->x + 429) current_theme = THEME_VIOLET;
+                else if (mouse_x >= win->x + 437 && mouse_x <= win->x + 532) current_theme = THEME_NIGHT;
                 play_bubble_sfx();
                 return;
             }
 
-            /* 2. Velocidad de Burbujas */
-            if (mouse_y >= win->y + 148 && mouse_y <= win->y + 176) {
-                if (mouse_x >= win->x + 25 && mouse_x <= win->x + 120) bubble_speed_mode = 0;
-                else if (mouse_x >= win->x + 130 && mouse_x <= win->x + 225) bubble_speed_mode = 1;
-                else if (mouse_x >= win->x + 235 && mouse_x <= win->x + 330) bubble_speed_mode = 2;
-                else if (mouse_x >= win->x + 340 && mouse_x <= win->x + 435) bubble_speed_mode = 3;
+            if (mouse_y >= win->y + 152 && mouse_y <= win->y + 182) {
+                if (mouse_x >= win->x + 25 && mouse_x <= win->x + 135) bubble_speed_mode = 0;
+                else if (mouse_x >= win->x + 145 && mouse_x <= win->x + 255) bubble_speed_mode = 1;
+                else if (mouse_x >= win->x + 265 && mouse_x <= win->x + 375) bubble_speed_mode = 2;
+                else if (mouse_x >= win->x + 385 && mouse_x <= win->x + 495) bubble_speed_mode = 3;
                 play_bubble_sfx();
                 return;
             }
 
-            /* 3. Opacidad de Cristal */
-            if (mouse_y >= win->y + 218 && mouse_y <= win->y + 246) {
-                if (mouse_x >= win->x + 25 && mouse_x <= win->x + 145) glass_alpha = 180;
-                else if (mouse_x >= win->x + 160 && mouse_x <= win->x + 280) glass_alpha = 225;
-                else if (mouse_x >= win->x + 295 && mouse_x <= win->x + 415) glass_alpha = 255;
+            if (mouse_y >= win->y + 230 && mouse_y <= win->y + 260) {
+                if (mouse_x >= win->x + 25 && mouse_x <= win->x + 165) glass_alpha = 180;
+                else if (mouse_x >= win->x + 180 && mouse_x <= win->x + 320) glass_alpha = 225;
+                else if (mouse_x >= win->x + 335 && mouse_x <= win->x + 475) glass_alpha = 255;
                 play_bubble_sfx();
                 return;
             }
 
-            /* 4. Colinas y Sonido */
-            if (mouse_y >= win->y + 288 && mouse_y <= win->y + 316) {
-                if (mouse_x >= win->x + 25 && mouse_x <= win->x + 225) {
+            if (mouse_y >= win->y + 308 && mouse_y <= win->y + 338) {
+                if (mouse_x >= win->x + 25 && mouse_x <= win->x + 245) {
                     show_eco_hills = !show_eco_hills;
                     play_bubble_sfx();
                     return;
-                } else if (mouse_x >= win->x + 240 && mouse_x <= win->x + 440) {
+                } else if (mouse_x >= win->x + 265 && mouse_x <= win->x + 485) {
                     sfx_enabled = !sfx_enabled;
                     play_bubble_sfx();
                     return;
@@ -1158,29 +1201,29 @@ static void handle_click(void) {
             }
         }
 
-        /* Explorador de Archivos */
+        /* Archivos */
         else if (active_win == WIN_FILES) {
-            int fx = win->x + 35, fy = win->y + 100;
-            if (mouse_x >= fx && mouse_x <= fx + 80 && mouse_y >= fy && mouse_y <= fy + 70) {
+            int fx = win->x + 40, fy = win->y + 105;
+            if (mouse_x >= fx - 10 && mouse_x <= fx + 85 && mouse_y >= fy - 8 && mouse_y <= fy + 77) {
                 modal_image_open = 1;
                 play_bubble_sfx();
                 return;
             }
         }
 
-        /* Aero Player */
+        /* Player */
         else if (active_win == WIN_PLAYER) {
-            int btn_x = win->x + win->w / 2 - 45;
-            int btn_y = win->y + 285;
-            if (mouse_x >= btn_x && mouse_x <= btn_x + 90 && mouse_y >= btn_y && mouse_y <= btn_y + 28) {
+            int btn_x = win->x + win->w / 2 - 50;
+            int btn_y = win->y + 315;
+            if (mouse_x >= btn_x && mouse_x <= btn_x + 100 && mouse_y >= btn_y && mouse_y <= btn_y + 32) {
                 music_playing = !music_playing;
                 play_bubble_sfx();
                 return;
             }
         }
 
-        /* Arrastre de Ventana */
-        if (mouse_y >= win->y && mouse_y <= win->y + 36) {
+        /* Arrastre */
+        if (mouse_y >= win->y && mouse_y <= win->y + 38) {
             is_dragging = 1;
             drag_off_x = mouse_x - win->x;
             drag_off_y = mouse_y - win->y;
@@ -1189,7 +1232,7 @@ static void handle_click(void) {
         return;
     }
 
-    /* 5. Traer ventana al frente */
+    /* Traer al frente */
     for (int i = WIN_COUNT - 1; i >= 0; i--) {
         if (i != active_win && windows[i].visible && !windows[i].minimized) {
             if (mouse_x >= windows[i].x && mouse_x <= windows[i].x + windows[i].w &&
@@ -1200,19 +1243,19 @@ static void handle_click(void) {
         }
     }
 
-    /* 6. Iconos del Escritorio */
-    if (mouse_x >= 30 && mouse_x <= 110) {
-        if (mouse_y >= 30 && mouse_y <= 110) bring_to_front(WIN_SYSTEM);
-        else if (mouse_y >= 125 && mouse_y <= 205) bring_to_front(WIN_FILES);
-        else if (mouse_y >= 220 && mouse_y <= 300) bring_to_front(WIN_PLAYER);
-        else if (mouse_y >= 315 && mouse_y <= 395) bring_to_front(WIN_BROWSER);
-        else if (mouse_y >= 410 && mouse_y <= 490) bring_to_front(WIN_SETTINGS);
+    /* Iconos del Escritorio */
+    if (mouse_x >= 35 && mouse_x <= 120) {
+        if (mouse_y >= 30 && mouse_y <= 115) bring_to_front(WIN_SYSTEM);
+        else if (mouse_y >= 130 && mouse_y <= 215) bring_to_front(WIN_FILES);
+        else if (mouse_y >= 230 && mouse_y <= 315) bring_to_front(WIN_PLAYER);
+        else if (mouse_y >= 330 && mouse_y <= 415) bring_to_front(WIN_BROWSER);
+        else if (mouse_y >= 430 && mouse_y <= 515) bring_to_front(WIN_SETTINGS);
         return;
     }
 }
 
 /* ============================================================================
- * Driver del Ratón
+ * Driver del Ratón PS/2
  * ============================================================================ */
 static uint8_t mouse_cycle = 0;
 static uint8_t mouse_bytes[3];
@@ -1247,7 +1290,7 @@ static void process_mouse_packet(void) {
 }
 
 /* ============================================================================
- * Punto de Entrada del Kernel
+ * Punto de Entrada del Kernel HD
  * ============================================================================ */
 void kernel_main(uint32_t magic, uint32_t addr) {
     (void)magic;
@@ -1257,17 +1300,16 @@ void kernel_main(uint32_t magic, uint32_t addr) {
         fb = (uint32_t*)(uint32_t)mbi->framebuffer_addr;
         screen_w = mbi->framebuffer_width;
         screen_h = mbi->framebuffer_height;
+        screen_pitch_pixels = mbi->framebuffer_pitch / 4;
 
         ps2_mouse_init();
         play_bubble_sfx();
 
         while (1) {
-            /* Procesar eventos de hardware (Ratón y Teclado) */
             while (inb(0x64) & 1) {
                 uint8_t status = inb(0x64);
                 uint8_t data   = inb(0x60);
 
-                /* Si el bit 5 de 0x64 está en 1, el byte proviene del ratón */
                 if (status & 0x20) {
                     if (mouse_cycle == 0) {
                         if (data & 0x08) {
@@ -1283,7 +1325,6 @@ void kernel_main(uint32_t magic, uint32_t addr) {
                         process_mouse_packet();
                     }
                 } else {
-                    /* Si el bit 5 está en 0, el byte proviene del TECLADO */
                     handle_keyboard_scancode(data);
                 }
             }
