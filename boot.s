@@ -1,5 +1,5 @@
 ; =============================================================================
-; boot.s — Multiboot v1 Bootloader con soporte para Framebuffer Gráfico VBE
+; boot.s — Multiboot v1 Bootloader con soporte para Framebuffer Gráfico VBE HD
 ; =============================================================================
 
 MB_MAGIC    equ 0x1BADB002
@@ -12,17 +12,17 @@ align 4
     dd MB_FLAGS
     dd MB_CHECKSUM
 
-    ; Campos para la solicitud de modo gráfico VBE en Multiboot v1
-    dd 0, 0, 0, 0, 0
-    dd 0
-    dd 1024
-    dd 768
-    dd 32
+    ; Campos para la solicitud de modo gráfico VBE en Multiboot v1 (HD Widescreen)
+    dd 0, 0, 0, 0, 0        ; aout kludge (no usado en ELF)
+    dd 0                    ; 0 = linear graphics mode
+    dd 1280                 ; Ancho HD: 1280
+    dd 720                  ; Alto HD: 720
+    dd 32                   ; BPP: 32 (ARGB True Color)
 
 section .bss
 align 16
 stack_bottom:
-    resb 32768              ; Pila de 32 KiB
+    resb 65536              ; Pila de 64 KiB
 stack_top:
 
 section .text
