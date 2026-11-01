@@ -12,9 +12,8 @@ align 4
     dd MB_FLAGS
     dd MB_CHECKSUM
 
-    ; Campos para la solicitud de modo gráfico VBE en Multiboot v1 (HD Widescreen)
-    dd 0, 0, 0, 0, 0        ; aout kludge (no usado en ELF)
-    dd 0                    ; 0 = linear graphics mode
+    ; Estos campos deben seguir al checksum cuando el bit 2 está activado.
+    dd 0                    ; Modo gráfico lineal
     dd 1280                 ; Ancho HD: 1280
     dd 720                  ; Alto HD: 720
     dd 32                   ; BPP: 32 (ARGB True Color)
