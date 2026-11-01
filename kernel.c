@@ -51,6 +51,8 @@ static uint32_t screen_w = 1280;
 static uint32_t screen_h = 720;
 static uint32_t screen_pitch_pixels = 1280;
 
+#define UI_WIDTH 1280
+#define UI_HEIGHT 720
 #define BACKBUFFER_ADDR 0x00400000
 static uint32_t* backbuffer = (uint32_t*)BACKBUFFER_ADDR;
 
@@ -156,46 +158,50 @@ static inline uint32_t blend(uint32_t fg, uint32_t bg, uint8_t a) {
 }
 
 static inline void bb_pixel(int x, int y, uint32_t color) {
-    if (x >= 0 && (uint32_t)x < screen_w && y >= 0 && (uint32_t)y < screen_h) {
-        backbuffer[y * screen_w + x] = color;
+    if (x >= 0 && x < UI_WIDTH && y >= 0 && y < UI_HEIGHT) {
+        backbuffer[y * UI_WIDTH + x] = color;
     }
 }
 
 static inline void bb_pixel_alpha(int x, int y, uint32_t color, uint8_t a) {
-    if (x >= 0 && (uint32_t)x < screen_w && y >= 0 && (uint32_t)y < screen_h) {
-        uint32_t bg = backbuffer[y * screen_w + x];
-        backbuffer[y * screen_w + x] = blend(color, bg, a);
+    if (x >= 0 && x < UI_WIDTH && y >= 0 && y < UI_HEIGHT) {
+        uint32_t bg = backbuffer[y * UI_WIDTH + x];
+        backbuffer[y * UI_WIDTH + x] = blend(color, bg, a);
     }
 }
 
 static void bb_fill_rect(int x, int y, int w, int h, uint32_t color) {
     for (int j = y; j < y + h; j++) {
-        if (j < 0 || (uint32_t)j >= screen_h) continue;
+        if (j < 0 || j >= UI_HEIGHT) continue;
         for (int i = x; i < x + w; i++) {
-            if (i < 0 || (uint32_t)i >= screen_w) continue;
-            backbuffer[j * screen_w + i] = color;
+            if (i < 0 || i >= UI_WIDTH) continue;
+            backbuffer[j * UI_WIDTH + i] = color;
         }
     }
 }
 
 static void bb_fill_rect_alpha(int x, int y, int w, int h, uint32_t color, uint8_t a) {
     for (int j = y; j < y + h; j++) {
-        if (j < 0 || (uint32_t)j >= screen_h) continue;
+        if (j < 0 || j >= UI_HEIGHT) continue;
         for (int i = x; i < x + w; i++) {
-            if (i < 0 || (uint32_t)i >= screen_w) continue;
+            if (i < 0 || i >= UI_WIDTH) continue;
             bb_pixel_alpha(i, j, color, a);
         }
     }
 }
 
-/* Rectángulo redondeado HD con antialiasing */
+/* Rectángulo de cristal con transición suave en las esquinas */
 static void draw_rounded_box_hd(int x, int y, int w, int h, int r, uint32_t color, uint8_t alpha) {
-    for (int j = y; j < y + h; j++) {
-        if (j < 0 || (uint32_t)j >= screen_h) continue;
-        for (int i = x; i < x + w; i++) {
-            if (i < 0 || (uint32_t)i >= screen_w) continue;
+    if (r < 1) {
+        bb_fill_rect_alpha(x, y, w, h, color, alpha);
+        return;
+    }
 
-            /* Comprobar esquinas redondeadas */
+    for (int j = y; j < y + h; j++) {
+        if (j < 0 || j >= UI_HEIGHT) continue;
+        for (int i = x; i < x + w; i++) {
+            if (i < 0 || i >= UI_WIDTH) continue;
+
             int in_corner = 0;
             int dist2 = 0;
             if (i < x + r && j < y + r) {
@@ -213,14 +219,14 @@ static void draw_rounded_box_hd(int x, int y, int w, int h, int r, uint32_t colo
             }
 
             if (in_corner) {
-                if (dist2 <= r * r) {
-                    /* Suavizado en el filo exterior */
-                    if (dist2 >= (r - 1) * (r - 1)) {
-                        bb_pixel_alpha(i, j, color, alpha / 2);
-                    } else {
-                        bb_pixel_alpha(i, j, color, alpha);
-                    }
+                int inner = (r - 1) * (r - 1);
+                int outer = (r + 1) * (r + 1);
+                if (dist2 >= outer) continue;
+                uint8_t edge_alpha = alpha;
+                if (dist2 > inner) {
+                    edge_alpha = (uint8_t)(((outer - dist2) * alpha) / (outer - inner));
                 }
+                bb_pixel_alpha(i, j, color, edge_alpha);
             } else {
                 bb_pixel_alpha(i, j, color, alpha);
             }
@@ -328,43 +334,46 @@ static void draw_text(int x, int y, const char* str, uint32_t color) {
     }
 }
 
+static void draw_text_aero(int x, int y, const char* str, uint32_t color, uint32_t shadow) {
+    draw_text(x + 1, y + 1, str, shadow);
+    draw_text(x, y, str, color);
+}
+
 /* ============================================================================
- * Esferas 3D con Antialiasing y Shader Especular HD
+ *  Esferas 3D con Antialiasing y Shader Especular HD
  * ============================================================================ */
 static void draw_sphere_hd(int cx, int cy, int r, uint32_t base_col) {
     int r2 = r * r;
-    for (int y = -r; y <= r; y++) {
-        for (int x = -r; x <= r; x++) {
+    int inner = (r - 1) * (r - 1);
+    int outer = (r + 1) * (r + 1);
+    for (int y = -r - 1; y <= r + 1; y++) {
+        for (int x = -r - 1; x <= r + 1; x++) {
             int d2 = x * x + y * y;
-            if (d2 <= r2) {
-                /* Borde suavizado */
-                if (d2 >= (r - 1) * (r - 1)) {
-                    bb_pixel_alpha(cx + x, cy + y, rgb(get_r(base_col)/2, get_g(base_col)/2, get_b(base_col)/2), 180);
-                    continue;
-                }
+            if (d2 >= outer) continue;
+            if (d2 > inner) {
+                uint8_t coverage = (uint8_t)(((outer - d2) * 255) / (outer - inner));
+                bb_pixel_alpha(cx + x, cy + y, base_col, coverage);
+                continue;
+            }
 
-                /* Cálculo de iluminación 3D esférica (Phong shader simplificado) */
-                int light_x = x + r / 3;
-                int light_y = y + r / 3;
-                int light_d2 = light_x * light_x + light_y * light_y;
+            /* Iluminación esférica con reflejos de cristal */
+            int light_x = x + r / 3;
+            int light_y = y + r / 3;
+            int light_d2 = light_x * light_x + light_y * light_y;
 
-                if (light_d2 < (r * r) / 10) {
-                    /* Brillo especular blanco puro */
-                    bb_pixel(cx + x, cy + y, rgb(255, 255, 255));
-                } else if (light_d2 < (r * r) / 3) {
-                    /* Reflejo brillante secundario */
-                    uint8_t nr = 180 + get_r(base_col) / 4;
-                    uint8_t ng = 220 + get_g(base_col) / 4;
-                    uint8_t nb = 240 + get_b(base_col) / 4;
-                    bb_pixel(cx + x, cy + y, rgb(nr, ng, nb));
-                } else {
-                    /* Sombreado perimetral */
-                    int shadow = (d2 * 120) / r2;
-                    uint8_t nr = (get_r(base_col) > shadow) ? (get_r(base_col) - shadow) : 0;
-                    uint8_t ng = (get_g(base_col) > shadow) ? (get_g(base_col) - shadow) : 0;
-                    uint8_t nb = (get_b(base_col) > shadow) ? (get_b(base_col) - shadow) : 0;
-                    bb_pixel(cx + x, cy + y, rgb(nr, ng, nb));
-                }
+            if (light_d2 < (r * r) / 10) {
+                bb_pixel(cx + x, cy + y, rgb(255, 255, 255));
+            } else if (light_d2 < (r * r) / 3) {
+                uint8_t nr = 180 + get_r(base_col) / 4;
+                uint8_t ng = 220 + get_g(base_col) / 4;
+                uint8_t nb = 240 + get_b(base_col) / 4;
+                bb_pixel(cx + x, cy + y, rgb(nr, ng, nb));
+            } else {
+                int shadow = (d2 * 120) / r2;
+                uint8_t nr = (get_r(base_col) > shadow) ? (get_r(base_col) - shadow) : 0;
+                uint8_t ng = (get_g(base_col) > shadow) ? (get_g(base_col) - shadow) : 0;
+                uint8_t nb = (get_b(base_col) > shadow) ? (get_b(base_col) - shadow) : 0;
+                bb_pixel(cx + x, cy + y, rgb(nr, ng, nb));
             }
         }
     }
@@ -399,25 +408,30 @@ static void update_and_draw_bubbles(void) {
 
         bubbles[i].y -= speed;
         if (bubbles[i].y < -50) {
-            bubbles[i].y = screen_h + 40;
+            bubbles[i].y = UI_HEIGHT + 40;
         }
 
         int cx = bubbles[i].x;
         int cy = bubbles[i].y;
         int r  = bubbles[i].radius;
         int r2 = r * r;
+        int inner = (r - 1) * (r - 1);
+        int outer = (r + 1) * (r + 1);
 
-        for (int y = -r; y <= r; y++) {
-            for (int x = -r; x <= r; x++) {
+        for (int y = -r - 1; y <= r + 1; y++) {
+            for (int x = -r - 1; x <= r + 1; x++) {
                 int d2 = x * x + y * y;
-                if (d2 <= r2) {
-                    if (d2 > r2 - (r * 3)) {
-                        bb_pixel_alpha(cx + x, cy + y, rgb(255, 255, 255), 180);
-                    } else if (x < -r/3 && y < -r/3 && (x+r/2)*(x+r/2) + (y+r/2)*(y+r/2) < (r/3)*(r/3)) {
-                        bb_pixel_alpha(cx + x, cy + y, rgb(255, 255, 255), 235);
-                    } else {
-                        bb_pixel_alpha(cx + x, cy + y, rgb(160, 235, 255), 45);
-                    }
+                if (d2 >= outer) continue;
+                if (d2 > inner) {
+                    uint8_t coverage = (uint8_t)(((outer - d2) * 230) / (outer - inner));
+                    bb_pixel_alpha(cx + x, cy + y, rgb(225, 250, 255), coverage);
+                } else if (d2 > r2 - (r * 3)) {
+                    bb_pixel_alpha(cx + x, cy + y, rgb(210, 250, 255), 135);
+                } else if (x < -r/3 && y < -r/3 &&
+                           (x+r/2)*(x+r/2) + (y+r/2)*(y+r/2) < (r/3)*(r/3)) {
+                    bb_pixel_alpha(cx + x, cy + y, rgb(255, 255, 255), 220);
+                } else {
+                    bb_pixel_alpha(cx + x, cy + y, rgb(160, 235, 255), 45);
                 }
             }
         }
@@ -469,10 +483,70 @@ static uint32_t anim_counter = 0;
 static int music_playing = 1;
 static int modal_image_open = 0;
 
+static inline uint8_t lerp_channel(uint8_t a, uint8_t b, uint32_t t) {
+    return (uint8_t)(((uint32_t)a * (256 - t) + (uint32_t)b * t + 128) >> 8);
+}
+
+static uint32_t sample_backbuffer(uint32_t x_fp, uint32_t y_fp) {
+    uint32_t x0 = x_fp >> 8;
+    uint32_t y0 = y_fp >> 8;
+    uint32_t x1 = x0 < UI_WIDTH - 1 ? x0 + 1 : x0;
+    uint32_t y1 = y0 < UI_HEIGHT - 1 ? y0 + 1 : y0;
+    uint32_t fx = x_fp & 0xFF;
+    uint32_t fy = y_fp & 0xFF;
+    uint32_t c00 = backbuffer[y0 * UI_WIDTH + x0];
+    uint32_t c10 = backbuffer[y0 * UI_WIDTH + x1];
+    uint32_t c01 = backbuffer[y1 * UI_WIDTH + x0];
+    uint32_t c11 = backbuffer[y1 * UI_WIDTH + x1];
+    uint8_t top_r = lerp_channel(get_r(c00), get_r(c10), fx);
+    uint8_t top_g = lerp_channel(get_g(c00), get_g(c10), fx);
+    uint8_t top_b = lerp_channel(get_b(c00), get_b(c10), fx);
+    uint8_t bottom_r = lerp_channel(get_r(c01), get_r(c11), fx);
+    uint8_t bottom_g = lerp_channel(get_g(c01), get_g(c11), fx);
+    uint8_t bottom_b = lerp_channel(get_b(c01), get_b(c11), fx);
+    return rgb(lerp_channel(top_r, bottom_r, fy),
+               lerp_channel(top_g, bottom_g, fy),
+               lerp_channel(top_b, bottom_b, fy));
+}
+
+static void present_backbuffer(void) {
+    if (screen_w == UI_WIDTH && screen_h == UI_HEIGHT) {
+        for (uint32_t y = 0; y < screen_h; y++) {
+            uint32_t* dst = fb + (size_t)y * screen_pitch_pixels;
+            const uint32_t* src = backbuffer + y * UI_WIDTH;
+            for (uint32_t x = 0; x < screen_w; x++) dst[x] = src[x];
+        }
+        return;
+    }
+
+    uint32_t x_step = screen_w > 1
+        ? ((UI_WIDTH - 1) << 16) / (screen_w - 1)
+        : 0;
+    uint32_t y_step = screen_h > 1
+        ? ((UI_HEIGHT - 1) << 16) / (screen_h - 1)
+        : 0;
+    uint32_t source_y = 0;
+    for (uint32_t y = 0; y < screen_h; y++) {
+        uint32_t y_fp = source_y >> 8;
+        if (y == screen_h - 1) y_fp = (UI_HEIGHT - 1) * 256;
+        uint32_t source_x = 0;
+        uint32_t* dst = fb + (size_t)y * screen_pitch_pixels;
+        for (uint32_t x = 0; x < screen_w; x++) {
+            uint32_t x_fp = source_x >> 8;
+            if (x == screen_w - 1) x_fp = (UI_WIDTH - 1) * 256;
+            dst[x] = sample_backbuffer(x_fp, y_fp);
+            source_x += x_step;
+        }
+        source_y += y_step;
+    }
+}
+
 /* Mouse */
 static int mouse_x = 640;
 static int mouse_y = 360;
 static uint8_t mouse_btn_prev = 0;
+static int mouse_scale_x_remainder = 0;
+static int mouse_scale_y_remainder = 0;
 
 /* ============================================================================
  * Renderizado del Contenido de las Ventanas HD
@@ -717,9 +791,11 @@ static void render_window(int id) {
     }
     for (int i = 2; i < ww - 2; i++) {
         bb_pixel(wx + i, wy + 3, rgb(255, 255, 255));
+        bb_pixel_alpha(wx + i, wy + 4, rgb(255, 255, 255), 85);
+        bb_pixel_alpha(wx + i, wy + 38, rgb(20, 100, 160), 70);
     }
 
-    draw_text(wx + 20, wy + 12, win->title, rgb(10, 50, 90));
+    draw_text_aero(wx + 20, wy + 12, win->title, rgb(10, 50, 90), rgb(205, 235, 250));
 
     /* Botones de Control de Ventana tipo Joya Esférica HD */
     draw_sphere_hd(wx + ww - 22, wy + 20, 8, rgb(235, 45, 45));
@@ -735,40 +811,51 @@ static void render_window(int id) {
 static void render_desktop(void) {
     anim_counter++;
 
-    /* 1. Fondo Widescreen HD con Gradiente Espectacular */
-    for (uint32_t y = 0; y < screen_h; y++) {
+    /* 1. Fondo Widescreen con degradado y halo ambiental */
+    for (uint32_t y = 0; y < UI_HEIGHT; y++) {
         uint8_t r, g, b;
         if (current_theme == THEME_OCEAN) {
-            r = 2 + (y * 22) / screen_h;
-            g = 35 + (y * 145) / screen_h;
-            b = 65 + (y * 125) / screen_h;
+            r = 2 + (y * 22) / UI_HEIGHT;
+            g = 35 + (y * 145) / UI_HEIGHT;
+            b = 65 + (y * 125) / UI_HEIGHT;
         } else if (current_theme == THEME_ECO) {
-            r = 10 + (y * 32) / screen_h;
-            g = 65 + (y * 135) / screen_h;
-            b = 40 + (y * 65) / screen_h;
+            r = 10 + (y * 32) / UI_HEIGHT;
+            g = 65 + (y * 135) / UI_HEIGHT;
+            b = 40 + (y * 65) / UI_HEIGHT;
         } else if (current_theme == THEME_SUNSET) {
-            r = 30 + (y * 185) / screen_h;
-            g = 45 + (y * 85) / screen_h;
-            b = 90 + (y * 45) / screen_h;
+            r = 30 + (y * 185) / UI_HEIGHT;
+            g = 45 + (y * 85) / UI_HEIGHT;
+            b = 90 + (y * 45) / UI_HEIGHT;
         } else if (current_theme == THEME_VIOLET) {
-            r = 45 + (y * 125) / screen_h;
-            g = 20 + (y * 65) / screen_h;
-            b = 85 + (y * 145) / screen_h;
+            r = 45 + (y * 125) / UI_HEIGHT;
+            g = 20 + (y * 65) / UI_HEIGHT;
+            b = 85 + (y * 145) / UI_HEIGHT;
         } else {
-            r = 6 + (y * 16) / screen_h;
-            g = 14 + (y * 32) / screen_h;
-            b = 28 + (y * 52) / screen_h;
+            r = 6 + (y * 16) / UI_HEIGHT;
+            g = 14 + (y * 32) / UI_HEIGHT;
+            b = 28 + (y * 52) / UI_HEIGHT;
         }
         uint32_t sky = rgb(r, g, b);
-        for (uint32_t x = 0; x < screen_w; x++) {
-            backbuffer[y * screen_w + x] = sky;
+        int horizon_dy = (int)y - 455;
+        for (uint32_t x = 0; x < UI_WIDTH; x++) {
+            uint32_t color = sky;
+            if (current_theme == THEME_OCEAN || current_theme == THEME_ECO) {
+                int dx = (int)x - 880;
+                int glow = 46 - (dx * dx / 18000) - (horizon_dy * horizon_dy / 900);
+                if (glow > 0) {
+                    uint32_t glow_color = current_theme == THEME_ECO
+                        ? rgb(190, 255, 215) : rgb(155, 238, 255);
+                    color = blend(glow_color, color, (uint8_t)glow);
+                }
+            }
+            backbuffer[y * UI_WIDTH + x] = color;
         }
     }
 
     /* 2. Colinas Eco Hills Curvadas HD */
     if (show_eco_hills) {
-        for (uint32_t y = 450; y < screen_h; y++) {
-            for (uint32_t x = 0; x < screen_w; x++) {
+        for (uint32_t y = 450; y < UI_HEIGHT; y++) {
+            for (uint32_t x = 0; x < UI_WIDTH; x++) {
                 int hill = 510 - (int)((x - 640) * (x - 640) / 6000);
                 if ((int)y >= hill) {
                     uint8_t gr = 30 + (y - hill) / 3;
@@ -785,31 +872,41 @@ static void render_desktop(void) {
 
     /* 4. Iconos del Escritorio HD */
     /* Icono 1: Mi Equipo */
-    draw_rounded_box_hd(35, 30, 85, 85, 12, rgb(255, 255, 255), 50);
+    draw_rounded_box_hd(33, 28, 89, 89, 14, rgb(255, 255, 255), 32);
+    draw_rounded_box_hd(35, 30, 85, 85, 12, rgb(220, 247, 255), 68);
+    draw_rounded_box_hd(39, 32, 77, 12, 6, rgb(255, 255, 255), 42);
     draw_rounded_box_hd(52, 44, 50, 34, 4, rgb(20, 140, 220), 255);
     draw_rounded_box_hd(57, 48, 40, 24, 2, rgb(230, 245, 255), 255);
-    draw_text(52, 100, "Equipo", rgb(255, 255, 255));
+    draw_text_aero(52, 100, "Equipo", rgb(255, 255, 255), rgb(5, 50, 75));
 
     /* Icono 2: Archivos */
-    draw_rounded_box_hd(35, 130, 85, 85, 12, rgb(255, 255, 255), 50);
+    draw_rounded_box_hd(33, 128, 89, 89, 14, rgb(255, 255, 255), 32);
+    draw_rounded_box_hd(35, 130, 85, 85, 12, rgb(220, 247, 255), 68);
+    draw_rounded_box_hd(39, 132, 77, 12, 6, rgb(255, 255, 255), 42);
     draw_rounded_box_hd(52, 146, 50, 34, 4, rgb(240, 180, 40), 255);
     draw_rounded_box_hd(57, 141, 24, 10, 2, rgb(220, 160, 30), 255);
-    draw_text(45, 200, "Archivos", rgb(255, 255, 255));
+    draw_text_aero(45, 200, "Archivos", rgb(255, 255, 255), rgb(5, 50, 75));
 
     /* Icono 3: Aero Player */
-    draw_rounded_box_hd(35, 230, 85, 85, 12, rgb(255, 255, 255), 50);
+    draw_rounded_box_hd(33, 228, 89, 89, 14, rgb(255, 255, 255), 32);
+    draw_rounded_box_hd(35, 230, 85, 85, 12, rgb(220, 247, 255), 68);
+    draw_rounded_box_hd(39, 232, 77, 12, 6, rgb(255, 255, 255), 42);
     draw_sphere_hd(77, 265, 22, rgb(0, 200, 160));
-    draw_text(52, 300, "Player", rgb(255, 255, 255));
+    draw_text_aero(52, 300, "Player", rgb(255, 255, 255), rgb(5, 50, 75));
 
     /* Icono 4: Navegador */
-    draw_rounded_box_hd(35, 330, 85, 85, 12, rgb(255, 255, 255), 50);
+    draw_rounded_box_hd(33, 328, 89, 89, 14, rgb(255, 255, 255), 32);
+    draw_rounded_box_hd(35, 330, 85, 85, 12, rgb(220, 247, 255), 68);
+    draw_rounded_box_hd(39, 332, 77, 12, 6, rgb(255, 255, 255), 42);
     draw_sphere_hd(77, 365, 22, rgb(0, 150, 240));
-    draw_text(42, 400, "Navegador", rgb(255, 255, 255));
+    draw_text_aero(42, 400, "Navegador", rgb(255, 255, 255), rgb(5, 50, 75));
 
     /* Icono 5: Ajustes */
-    draw_rounded_box_hd(35, 430, 85, 85, 12, rgb(255, 255, 255), 50);
+    draw_rounded_box_hd(33, 428, 89, 89, 14, rgb(255, 255, 255), 32);
+    draw_rounded_box_hd(35, 430, 85, 85, 12, rgb(220, 247, 255), 68);
+    draw_rounded_box_hd(39, 432, 77, 12, 6, rgb(255, 255, 255), 42);
     draw_sphere_hd(77, 465, 22, rgb(0, 190, 180));
-    draw_text(50, 500, "Ajustes", rgb(255, 255, 255));
+    draw_text_aero(50, 500, "Ajustes", rgb(255, 255, 255), rgb(5, 50, 75));
 
     /* 5. Renderizar Ventanas */
     for (int i = 0; i < WIN_COUNT; i++) {
@@ -835,22 +932,26 @@ static void render_desktop(void) {
     }
 
     /* 6. Barra de Tareas Inferior HD (Aero Taskbar) */
-    int tby = screen_h - 52;
+    int tby = UI_HEIGHT - 52;
     for (int j = 0; j < 52; j++) {
-        uint8_t tb_r = 10 + j * 2;
-        uint8_t tb_g = 60 + j * 3;
-        uint8_t tb_b = 135 + j * 2;
-        for (uint32_t i = 0; i < screen_w; i++) {
+        uint8_t tb_r = 8 + j;
+        uint8_t tb_g = 48 + j * 2;
+        uint8_t tb_b = 102 + j * 2;
+        for (uint32_t i = 0; i < UI_WIDTH; i++) {
             bb_pixel_alpha(i, tby + j, rgb(tb_r, tb_g, tb_b), 205);
         }
     }
-    for (uint32_t i = 0; i < screen_w; i++) {
+    for (uint32_t i = 0; i < UI_WIDTH; i++) {
         bb_pixel_alpha(i, tby, rgb(200, 240, 255), 230);
+    }
+    for (uint32_t i = 0; i < UI_WIDTH; i++) {
+        bb_pixel_alpha(i, tby + 1, rgb(255, 255, 255), 55);
+        bb_pixel_alpha(i, tby + 50, rgb(0, 25, 70), 70);
     }
 
     /* Start Orb HD Esférico */
     draw_sphere_hd(36, tby + 26, 22, rgb(0, 130, 240));
-    draw_text(32, tby + 18, "K", rgb(255, 255, 255));
+    draw_text_aero(32, tby + 18, "K", rgb(255, 255, 255), rgb(0, 55, 120));
 
     /* Botones de Aplicaciones Abiertas en la Barra de Tareas HD */
     int tbx = 80;
@@ -859,7 +960,8 @@ static void render_desktop(void) {
         if (windows[i].visible) {
             uint32_t btn_bg = (i == active_win && !windows[i].minimized) ? rgb(255, 255, 255) : rgb(180, 220, 250);
             draw_rounded_box_hd(tbx, tby + 8, 105, 36, 6, btn_bg, 85);
-            draw_text(tbx + 18, tby + 18, app_names[i], rgb(255, 255, 255));
+            draw_rounded_box_hd(tbx + 3, tby + 9, 99, 7, 4, rgb(255, 255, 255), 42);
+            draw_text_aero(tbx + 18, tby + 18, app_names[i], rgb(255, 255, 255), rgb(0, 38, 90));
             tbx += 115;
         }
     }
@@ -878,8 +980,9 @@ static void render_desktop(void) {
     time_str[7] = '0' + (rs % 10);
     time_str[8] = '\0';
 
-    draw_rounded_box_hd(screen_w - 120, tby + 8, 105, 36, 6, rgb(255, 255, 255), 45);
-    draw_text(screen_w - 100, tby + 18, time_str, rgb(255, 255, 255));
+    draw_rounded_box_hd(UI_WIDTH - 120, tby + 8, 105, 36, 6, rgb(255, 255, 255), 45);
+    draw_text_aero(UI_WIDTH - 100, tby + 18, time_str,
+                   rgb(255, 255, 255), rgb(0, 38, 90));
 
     /* 7. Menú Inicio Desplegable HD */
     if (start_menu_open) {
@@ -887,7 +990,8 @@ static void render_desktop(void) {
         int sm_x = 10, sm_y = tby - sm_h - 4;
         draw_rounded_box_hd(sm_x, sm_y, sm_w, sm_h, 12, rgb(240, 250, 255), 235);
         draw_rounded_box_hd(sm_x, sm_y, sm_w, 46, 12, rgb(0, 120, 210), 255);
-        draw_text(sm_x + 18, sm_y + 16, "Usuario Aero - Kolotibablo HD", rgb(255, 255, 255));
+        draw_text_aero(sm_x + 18, sm_y + 16, "Usuario Aero - Kolotibablo HD",
+                       rgb(255, 255, 255), rgb(0, 40, 90));
 
         draw_text(sm_x + 22, sm_y + 65, "> 1. Mi Equipo", rgb(20, 60, 100));
         draw_text(sm_x + 22, sm_y + 102, "> 2. Explorador de Archivos", rgb(20, 60, 100));
@@ -915,9 +1019,7 @@ static void render_desktop(void) {
     }
 
     /* 9. Vuelco al Framebuffer */
-    for (uint32_t i = 0; i < screen_w * screen_h; i++) {
-        fb[i] = backbuffer[i];
-    }
+    present_backbuffer();
 }
 
 /* ============================================================================
@@ -1059,7 +1161,7 @@ static void bring_to_front(int id) {
 }
 
 static void handle_click(void) {
-    int tby = screen_h - 52;
+    int tby = UI_HEIGHT - 52;
 
     if (modal_image_open) {
         if (mouse_x >= 865 && mouse_x <= 885 && mouse_y >= 148 && mouse_y <= 168) {
@@ -1265,13 +1367,27 @@ static void process_mouse_packet(void) {
     int8_t dx = (int8_t)mouse_bytes[1];
     int8_t dy = (int8_t)mouse_bytes[2];
 
-    mouse_x += dx;
-    mouse_y -= dy;
+    int scaled_dx = (int)dx * UI_WIDTH + mouse_scale_x_remainder;
+    int scaled_dy = (int)dy * UI_HEIGHT + mouse_scale_y_remainder;
+    mouse_x += scaled_dx / (int)screen_w;
+    mouse_y -= scaled_dy / (int)screen_h;
+    mouse_scale_x_remainder = scaled_dx % (int)screen_w;
+    mouse_scale_y_remainder = scaled_dy % (int)screen_h;
 
-    if (mouse_x < 0) mouse_x = 0;
-    if (mouse_x >= (int)screen_w - 1) mouse_x = screen_w - 2;
-    if (mouse_y < 0) mouse_y = 0;
-    if (mouse_y >= (int)screen_h - 1) mouse_y = screen_h - 2;
+    if (mouse_x < 0) {
+        mouse_x = 0;
+        mouse_scale_x_remainder = 0;
+    } else if (mouse_x >= UI_WIDTH) {
+        mouse_x = UI_WIDTH - 1;
+        mouse_scale_x_remainder = 0;
+    }
+    if (mouse_y < 0) {
+        mouse_y = 0;
+        mouse_scale_y_remainder = 0;
+    } else if (mouse_y >= UI_HEIGHT) {
+        mouse_y = UI_HEIGHT - 1;
+        mouse_scale_y_remainder = 0;
+    }
 
     uint8_t btn_left = flags & 1;
 
@@ -1296,7 +1412,10 @@ void kernel_main(uint32_t magic, uint32_t addr) {
     (void)magic;
     struct multiboot_info* mbi = (struct multiboot_info*)addr;
 
-    if ((mbi->flags & (1 << 12)) && mbi->framebuffer_addr != 0 && mbi->framebuffer_bpp == 32) {
+    if ((mbi->flags & (1 << 12)) && mbi->framebuffer_addr != 0 &&
+        mbi->framebuffer_bpp == 32 && mbi->framebuffer_width > 0 &&
+        mbi->framebuffer_height > 0 &&
+        mbi->framebuffer_pitch / 4 >= mbi->framebuffer_width) {
         fb = (uint32_t*)(uint32_t)mbi->framebuffer_addr;
         screen_w = mbi->framebuffer_width;
         screen_h = mbi->framebuffer_height;
